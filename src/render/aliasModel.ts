@@ -204,6 +204,26 @@ export class AliasModel {
     this.setFrames(frame, frame + 1, position - frame);
   }
 
+  /**
+   * Joue une séquence délimitée. Une séquence qui ne boucle pas se fige sur
+   * sa dernière image, ce qu'attend une mort.
+   */
+  playRange(elapsed: number, first: number, count: number, fps: number, loop = true): void {
+    if (count <= 1) {
+      this.setFrames(first, first, 0);
+      return;
+    }
+    const position = elapsed * fps;
+    if (!loop && position >= count - 1) {
+      this.setFrames(first + count - 1, first + count - 1, 0);
+      return;
+    }
+    const step = loop ? position % count : Math.min(position, count - 1);
+    const frame = Math.floor(step);
+    const next = loop ? (frame + 1) % count : Math.min(frame + 1, count - 1);
+    this.setFrames(first + frame, first + next, step - frame);
+  }
+
   setFlashlight(position: THREE.Vector3, color: THREE.Color, radius: number): void {
     this.material.uniforms.uFlashPos.value.copy(position);
     this.material.uniforms.uFlashColor.value.copy(color);

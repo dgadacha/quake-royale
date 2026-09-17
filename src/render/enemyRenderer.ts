@@ -2,6 +2,15 @@ import * as THREE from 'three';
 import type { Enemy } from '../game/entities/Enemy';
 import { quakeToThree } from './world';
 import { SHADOW_CASTER_LAYER } from './shadows';
+import { AliasModel, type AliasModelOptions } from './aliasModel';
+import {
+  detectAnimations,
+  rangeForState,
+  type AnimationKind,
+  type AnimationRange,
+} from './aliasAnimation';
+import type { MdlModel } from '../formats/mdl';
+import type { Palette } from '../formats/palette';
 
 /**
  * Silhouette de substitution.
@@ -50,18 +59,54 @@ function buildSilhouette(color: THREE.Color, radius: number, height: number): TH
 export interface EnemyView {
   enemy: Enemy;
   group: THREE.Group;
-  eyeMaterial: THREE.MeshBasicMaterial;
+  /** Présent seulement sur la silhouette de substitution. */
+  eyeMaterial: THREE.MeshBasicMaterial | null;
+  /** Présent quand un modèle a pu être chargé. */
+  model: AliasModel | null;
+  animations: Map<AnimationKind, AnimationRange> | null;
+  current: AnimationRange | null;
+  elapsed: number;
 }
+
+/** Fournit le modèle d'une créature, ou rien s'il n'est pas disponible. */
+export type EnemyModelLoader = (classname: string) => MdlModel | null;
 
 /** Affiche les adversaires et suit leur état image par image. */
 export class EnemyRenderer {
   readonly root = new THREE.Group();
   private readonly views: EnemyView[] = [];
 
-  constructor(enemies: Enemy[]) {
+  constructor(
+    enemies: Enemy[],
+    loader: EnemyModelLoader | null = null,
+    palette: Palette | null = null,
+    options: AliasModelOptions | null = null,
+  ) {
     this.root.name = 'enemies';
 
     for (const enemy of enemies) {
+      const parsed = loader && palette && options ? loader(enemy.classname) : null;
+
+      if (parsed) {
+        // Modèle disponible : il porte sa propre apparence et ses séquences.
+        const model = new AliasModel(parsed, palette!, options!);
+        model.mesh.layers.enable(SHADOW_CASTER_LAYER);
+        const group = new THREE.Group();
+        group.add(model.mesh);
+        const animations = detectAnimations(parsed);
+        this.views.push({
+          enemy,
+          group,
+          eyeMaterial: null,
+          model,
+          animations,
+          current: animations.get('idle') ?? null,
+          elapsed: 0,
+        });
+        this.root.add(group);
+        continue;
+      }
+
       const group = buildSilhouette(
         new THREE.Color(...enemy.profile.color),
         enemy.profile.radius,
@@ -72,16 +117,36 @@ export class EnemyRenderer {
         enemy,
         group,
         eyeMaterial: eyeMesh.material as THREE.MeshBasicMaterial,
+        model: null,
+        animations: null,
+        current: null,
+        elapsed: 0,
       });
       this.root.add(group);
     }
   }
 
-  update(): void {
+  /** Séquence correspondant à l'état courant, par ordre de préférence. */
+  private wantedFor(enemy: Enemy): AnimationKind[] {
+    switch (enemy.state) {
+      case 'dying':
+      case 'dead':
+        return ['death', 'pain', 'idle'];
+      case 'attacking':
+        return ['attack', 'idle'];
+      case 'chasing':
+        return ['run', 'walk', 'idle'];
+      default:
+        return ['idle'];
+    }
+  }
+
+  update(deltaTime = 0): void {
     for (const view of this.views) {
       const { enemy, group } = view;
 
-      if (enemy.state === 'dead') {
+      // Un corps abattu reste visible s'il a une image de mort à montrer.
+      if (enemy.state === 'dead' && !view.model) {
         group.visible = false;
         continue;
       }
@@ -91,6 +156,21 @@ export class EnemyRenderer {
       // Le lacet du jeu tourne autour de la verticale, inversé au passage
       // dans le repère de rendu.
       group.rotation.y = -enemy.yaw;
+
+      if (view.model && view.animations) {
+        // Changer de séquence remet le compteur à zéro, sinon une mort
+        // reprendrait au milieu de son mouvement.
+        const wanted = rangeForState(view.animations, this.wantedFor(enemy));
+        if (wanted !== view.current) {
+          view.current = wanted;
+          view.elapsed = 0;
+        }
+        view.elapsed += deltaTime;
+        view.model.playRange(view.elapsed, wanted.first, wanted.count, wanted.fps, wanted.loop);
+        continue;
+      }
+
+      if (!view.eyeMaterial) continue;
 
       if (enemy.state === 'dying') {
         // La créature s'affaisse et s'enfonce légèrement.
@@ -105,7 +185,17 @@ export class EnemyRenderer {
     }
   }
 
+  /** Transmet la lampe portée aux modèles, comme pour l'arme. */
+  setFlashlight(position: THREE.Vector3, color: THREE.Color, radius: number): void {
+    for (const view of this.views) view.model?.setFlashlight(position, color, radius);
+  }
+
+  get modelCount(): number {
+    return this.views.filter((view) => view.model !== null).length;
+  }
+
   dispose(): void {
+    for (const view of this.views) view.model?.dispose();
     this.root.traverse((object) => {
       if (object instanceof THREE.Mesh) {
         object.geometry.dispose();

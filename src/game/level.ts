@@ -11,7 +11,8 @@ import { buildFaceLeafIndex, VisibilitySet } from '../render/pvs';
 import { DecalPool } from '../render/decals';
 import { ImpactParticles } from '../render/impactParticles';
 import { surfaceAt } from './entities/SurfaceProbe';
-import { collectEnemies } from './entities/Enemy';
+import { collectEnemies, enemyModels } from './entities/Enemy';
+import { parseMdl, type MdlModel } from '../formats/mdl';
 import { EnemyManager } from './entities/EnemyManager';
 import { EnemyRenderer } from '../render/enemyRenderer';
 import { fireRay } from './entities/Combat';
@@ -75,6 +76,8 @@ export interface Level {
     /** Portes, plateformes et boutons animés. */
     movers?: number;
     enemies?: number;
+    /** Créatures affichées avec leur modèle plutôt qu'une silhouette. */
+    enemyModels?: number;
   };
 }
 
@@ -241,7 +244,32 @@ export function loadBspLevel(
     },
     { onPlayerHit: (damage) => { pendingDamage += damage; } },
   );
-  const enemyRenderer = new EnemyRenderer(enemies);
+  // Modèles des créatures, lus dans les données montées. Chaque fichier n'est
+  // analysé qu'une fois, même s'il sert à trente occupants.
+  const modelCache = new Map<string, MdlModel | null>();
+  const loadEnemyModel = (classname: string): MdlModel | null => {
+    const path = enemyModels[classname];
+    if (!path) return null;
+    if (!modelCache.has(path)) {
+      const data = vfs.read(path);
+      try {
+        modelCache.set(path, data ? parseMdl(data) : null);
+      } catch (error) {
+        console.warn(`[quake-hd] modèle illisible ${path} : ${(error as Error).message}`);
+        modelCache.set(path, null);
+      }
+    }
+    return modelCache.get(path) ?? null;
+  };
+
+  const enemyRenderer = new EnemyRenderer(enemies, loadEnemyModel, palette, {
+    anisotropy: options.anisotropy,
+    ambient: options.ambient,
+    fogColor: options.fogColor,
+    fogDensity: options.fogDensity,
+    lightScale: options.lightScale,
+    emissiveStrength: options.emissiveStrength,
+  });
 
   // Traces laissées par les tirs et éclats projetés à l'impact.
   const decals = new DecalPool();
@@ -276,6 +304,7 @@ export function loadBspLevel(
     setFlashlight(position, color, radius) {
       world.setFlashlight(position, color, radius);
       for (const entity of placed) entity.model.setFlashlight(position, color, radius);
+      enemyRenderer.setFlashlight(position, color, radius);
     },
     sampleLighting,
     // Entités d'éclairage et surfaces émettrices alimentent la même liste.
@@ -295,7 +324,7 @@ export function loadBspLevel(
       particles.update(deltaTime);
       if (enemies.length === 0) return 0;
       enemyManager.update(deltaTime, playerPosition);
-      enemyRenderer.update();
+      enemyRenderer.update(deltaTime);
       const damage = pendingDamage;
       pendingDamage = 0;
       return damage;
@@ -411,6 +440,7 @@ export function loadBspLevel(
       paletteMissing,
       movers: movers.length,
       enemies: enemies.length,
+      enemyModels: enemyRenderer.modelCount,
     },
     effectsInfo: () => ({ decals: decals.activeCount, particles: particles.activeCount }),
   };

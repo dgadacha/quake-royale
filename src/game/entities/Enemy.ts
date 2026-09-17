@@ -83,6 +83,32 @@ export function profileFor(classname: string): EnemyProfile {
   return enemyProfiles.soldier;
 }
 
+/**
+ * Fichier de modèle associé à chaque nom d'entité.
+ *
+ * Ces chemins désignent des fichiers de la copie du jeu de l'utilisateur,
+ * montée localement : aucun n'est fourni ici. Un nom absent de la table, ou
+ * dont le fichier manque, retombe sur la silhouette construite par le code.
+ */
+export const enemyModels: Record<string, string> = {
+  monster_army: 'progs/soldier.mdl',
+  monster_dog: 'progs/dog.mdl',
+  monster_enforcer: 'progs/enforcer.mdl',
+  monster_ogre: 'progs/ogre.mdl',
+  monster_ogre_marksman: 'progs/ogre.mdl',
+  monster_knight: 'progs/knight.mdl',
+  monster_hell_knight: 'progs/hknight.mdl',
+  monster_wizard: 'progs/wizard.mdl',
+  monster_demon1: 'progs/demon.mdl',
+  monster_shambler: 'progs/shambler.mdl',
+  monster_zombie: 'progs/zombie.mdl',
+  monster_tarbaby: 'progs/tarbaby.mdl',
+  monster_fish: 'progs/fish.mdl',
+  monster_shalrath: 'progs/shalrath.mdl',
+  monster_boss: 'progs/boss.mdl',
+  monster_oldone: 'progs/oldone.mdl',
+};
+
 export interface Enemy {
   profile: EnemyProfile;
   classname: string;
