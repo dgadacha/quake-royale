@@ -36,6 +36,10 @@ export class Session {
   private frameTimes: number[] = [];
   private elapsed = 0;
   private flashColor = new THREE.Color(0.55, 0.48, 0.38);
+  /** Reste de l'éclair de bouche, qui éclaire aussi le décor. */
+  private muzzleGlow = 0;
+  private readonly lampColor = new THREE.Color();
+  private readonly muzzleColor = new THREE.Color(1.5, 1.1, 0.62);
   // Objets réutilisés à chaque image, pour ne rien allouer dans la boucle.
   private readonly keyDirection = new THREE.Vector3();
   private readonly keyColor = new THREE.Color();
@@ -156,9 +160,13 @@ export class Session {
       this.level.update(this.elapsed);
 
       // Lampe portée : le halo suit la tête, jamais la direction de visée
-      // pour ne pas écraser le modelé des lightmaps.
+      // pour ne pas écraser le modelé des lightmaps. Le temps d'un coup de
+      // feu, elle se renforce et se réchauffe : le décor doit s'éclairer
+      // aussi, sinon l'éclair semble n'exister que sur l'arme.
+      this.muzzleGlow = Math.max(0, this.muzzleGlow - delta * 9);
       const eye = this.player.eyeWorldPosition();
-      this.level.setFlashlight(eye, this.flashColor, 420);
+      this.lampColor.copy(this.flashColor).lerp(this.muzzleColor, this.muzzleGlow);
+      this.level.setFlashlight(eye, this.lampColor, 420 + this.muzzleGlow * 560);
 
       const targetUnderwater = this.player.underwater ? 1 : 0;
       this.underwaterAmount += (targetUnderwater - this.underwaterAmount) * Math.min(1, delta * 6);
@@ -171,7 +179,10 @@ export class Session {
       this.post.setUnderwater(this.underwaterAmount, tint);
       this.post.setDamage(this.player.inLava ? 0.35 + Math.sin(this.elapsed * 12) * 0.1 : 0);
 
-      if (this.player.consumeAttack()) this.viewmodel.fire();
+      if (this.player.consumeAttack()) {
+        this.viewmodel.fire();
+        this.muzzleGlow = 1;
+      }
 
       // La lumière dominante du niveau est ramenée dans le repère de la vue :
       // l'arme, qui vit dans une scène fixe, reçoit ainsi sa lumière du côté

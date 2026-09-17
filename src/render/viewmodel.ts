@@ -41,6 +41,63 @@ export interface ViewmodelState {
 const MAX_SPEED = 320;
 
 /**
+ * Éclair de bouche, dessiné sans texture : un noyau chaud, une couronne et
+ * quelques branches. Le plan reste face à la caméra, qui ne bouge pas dans
+ * cette scène, et ne s'écrit pas dans la profondeur pour ne pas masquer le
+ * canon d'où il sort.
+ */
+function createMuzzleFlashMesh(): THREE.Mesh {
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      uIntensity: { value: 0 },
+      uColor: { value: new THREE.Color(1.0, 0.82, 0.48) },
+      uSeed: { value: 0 },
+    },
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      precision highp float;
+      uniform float uIntensity;
+      uniform vec3 uColor;
+      uniform float uSeed;
+      varying vec2 vUv;
+
+      void main() {
+        vec2 p = vUv * 2.0 - 1.0;
+        float radius = length(p);
+        if (radius > 1.0 || uIntensity <= 0.0) discard;
+
+        float angle = atan(p.y, p.x) + uSeed;
+
+        float core = exp(-radius * 7.0);
+        float halo = exp(-radius * 2.6) * 0.45;
+        // Branches irrégulières : un éclair parfaitement symétrique se voit.
+        float spikes = pow(abs(cos(angle * 2.5)), 10.0) * exp(-radius * 2.2) * 0.8;
+        spikes += pow(abs(cos(angle * 4.0 + 1.7)), 14.0) * exp(-radius * 3.0) * 0.5;
+
+        float amount = (core + halo + spikes) * uIntensity;
+        gl_FragColor = vec4(uColor * amount, amount);
+      }
+    `,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    depthTest: false,
+  });
+
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+  mesh.frustumCulled = false;
+  mesh.visible = false;
+  mesh.renderOrder = 10;
+  return mesh;
+}
+
+/**
  * Arme tenue en vue première personne.
  *
  * Elle vit dans sa propre scène et sa propre caméra : la passe de rendu qui
@@ -73,6 +130,16 @@ export class Viewmodel {
   private lastCapture = new THREE.Vector3(Infinity, Infinity, Infinity);
   private captureAge = Infinity;
 
+  private readonly muzzleFlashMesh = createMuzzleFlashMesh();
+  /**
+   * Bouche du canon, dans le repère du modèle normalisé. L'extrémité du
+   * volume donne le bon avancement, mais le canon occupe la partie haute de
+   * l'arme : sans relèvement, l'éclair sortirait du milieu du corps.
+   */
+  private readonly muzzleLocal = new THREE.Vector3(-0.52, 0.055, 0);
+  private readonly muzzleWorld = new THREE.Vector3();
+
+  private flashHold: number | null = null;
   private bobPhase = 0;
   private swayX = 0;
   private swayY = 0;
@@ -100,8 +167,8 @@ export class Viewmodel {
     this.lampLight = new THREE.PointLight(0xffd9a8, 1.1, 6, 1.6);
     this.lampLight.position.set(0.1, 0.25, 0.4);
     this.muzzleLight = new THREE.PointLight(0xffc266, 0, 4, 2);
-    this.muzzleLight.position.set(0.1, -0.05, -1.1);
     this.scene.add(this.fillLight, this.keyLight, this.lampLight, this.muzzleLight);
+    this.scene.add(this.muzzleFlashMesh);
   }
 
   private anisotropy: number;
@@ -216,8 +283,42 @@ export class Viewmodel {
   }
 
   fire(): void {
-    this.recoilVelocity += 7.5;
+    // Le recul s'additionne d'un coup à l'autre, mais reste borné : une
+    // cadence élevée ne doit pas pouvoir repousser l'arme hors du cadre.
+    this.recoilVelocity = Math.min(this.recoilVelocity + 7.5, 11);
     this.muzzleFlash = 1;
+    // Orientation tirée au sort à chaque coup, sinon l'éclair se répète.
+    const material = this.muzzleFlashMesh.material as THREE.ShaderMaterial;
+    material.uniforms.uSeed.value = Math.random() * Math.PI * 2;
+  }
+
+  /**
+   * Position de la bouche dans la scène de l'arme, déduite de la géométrie
+   * du modèle : l'extrémité avant de son volume, suivie à travers la pose
+   * courante et les mouvements d'animation.
+   */
+  getMuzzlePosition(target = new THREE.Vector3()): THREE.Vector3 {
+    this.holder.updateWorldMatrix(true, false);
+    return target.copy(this.muzzleLocal).applyMatrix4(this.holder.matrixWorld);
+  }
+
+  /**
+   * Fige l'éclair à une intensité donnée, ou rend la main à l'extinction
+   * normale. Sert à l'inspecter, sa durée réelle étant trop brève.
+   */
+  holdFlash(value: number | null): void {
+    this.flashHold = value;
+    if (value !== null) this.muzzleFlash = value;
+  }
+
+  /** Décalage fin de la bouche, réglable sans recompiler. */
+  setMuzzleOffset(x: number, y: number, z: number): [number, number, number] {
+    this.muzzleLocal.set(x, y, z);
+    return [x, y, z];
+  }
+
+  getMuzzleOffset(): [number, number, number] {
+    return [this.muzzleLocal.x, this.muzzleLocal.y, this.muzzleLocal.z];
   }
 
   setAspect(aspect: number): void {
@@ -247,7 +348,7 @@ export class Viewmodel {
     // Recul : ressort amorti, sans rebond visible.
     this.recoilVelocity -= this.recoil * 90 * deltaTime;
     this.recoilVelocity *= Math.exp(-11 * deltaTime);
-    this.recoil += this.recoilVelocity * deltaTime;
+    this.recoil = THREE.MathUtils.clamp(this.recoil + this.recoilVelocity * deltaTime, -0.02, 0.13);
     if (Math.abs(this.recoil) < 0.0002 && Math.abs(this.recoilVelocity) < 0.002) {
       this.recoil = 0;
       this.recoilVelocity = 0;
@@ -281,8 +382,23 @@ export class Viewmodel {
     this.lampLight.intensity = 0.9 - brightness * 0.6;
     this.scene.environmentIntensity = 0.5 + brightness * 0.9;
 
-    this.muzzleFlash = Math.max(0, this.muzzleFlash - deltaTime * 9);
-    this.muzzleLight.intensity = this.muzzleFlash * 26;
+    // L'éclair part de la bouche, pas d'un point fixe de la scène : il suit
+    // donc le recul et le balancement de l'arme.
+    this.muzzleFlash =
+      this.flashHold !== null ? this.flashHold : Math.max(0, this.muzzleFlash - deltaTime * 11);
+    this.getMuzzlePosition(this.muzzleWorld);
+    this.muzzleLight.position.copy(this.muzzleWorld);
+    this.muzzleLight.intensity = this.muzzleFlash * 22;
+
+    const flashMaterial = this.muzzleFlashMesh.material as THREE.ShaderMaterial;
+    this.muzzleFlashMesh.visible = this.muzzleFlash > 0.001;
+    if (this.muzzleFlashMesh.visible) {
+      this.muzzleFlashMesh.position.copy(this.muzzleWorld);
+      // Il s'étale en s'éteignant, comme une bouffée de gaz.
+      const growth = 0.19 + (1 - this.muzzleFlash) * 0.1;
+      this.muzzleFlashMesh.scale.setScalar(growth);
+      flashMaterial.uniforms.uIntensity.value = Math.pow(this.muzzleFlash, 0.75) * 1.15;
+    }
   }
 
   dispose(): void {

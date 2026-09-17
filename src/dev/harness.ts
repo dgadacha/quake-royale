@@ -111,6 +111,19 @@ export function installHarness(session: Session): void {
       return 'tir';
     },
 
+    /** Fige l'éclair de bouche pour l'observer, null pour reprendre. */
+    holdFlash(value: number | null = 1) {
+      session.viewmodel.holdFlash(value);
+      return value;
+    },
+
+    /** Lit ou ajuste la position de la bouche du canon. */
+    muzzle(offset?: [number, number, number]) {
+      const viewmodel = session.viewmodel;
+      if (!offset) return viewmodel.getMuzzleOffset();
+      return viewmodel.setMuzzleOffset(offset[0], offset[1], offset[2]);
+    },
+
     /** Décalage courant de l'arme, pour observer le recul et le balancement. */
     weaponMotion() {
       return session.viewmodel.getMotion();
