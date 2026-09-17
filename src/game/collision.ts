@@ -57,6 +57,32 @@ export class BspCollision {
     };
   }
 
+  /**
+   * Trace dans un sous-modèle déplacé.
+   *
+   * Une porte ouverte n'est pas au même endroit que sa géométrie compilée :
+   * plutôt que de reconstruire son volume, on ramène le trajet dans le repère
+   * du sous-modèle en lui retranchant son décalage courant.
+   */
+  traceModel(
+    modelIndex: number,
+    hullIndex: number,
+    start: Vec3,
+    end: Vec3,
+    offset: Vec3,
+  ): TraceResult {
+    const hull = this.hull(modelIndex, hullIndex);
+    const localStart: Vec3 = [start[0] - offset[0], start[1] - offset[1], start[2] - offset[2]];
+    const localEnd: Vec3 = [end[0] - offset[0], end[1] - offset[1], end[2] - offset[2]];
+    const trace = this.trace(hull, localStart, localEnd);
+    trace.endPos = [
+      trace.endPos[0] + offset[0],
+      trace.endPos[1] + offset[1],
+      trace.endPos[2] + offset[2],
+    ];
+    return trace;
+  }
+
   /** Vue prête à l'emploi sur un gabarit donné. */
   world(modelIndex = 0, hullIndex = HULL_PLAYER): CollisionWorld {
     const hull = this.hull(modelIndex, hullIndex);

@@ -2,11 +2,14 @@ import * as THREE from 'three';
 import { parseBsp, type BspEntity } from '../formats/bsp';
 import { Palette } from '../formats/palette';
 import type { VirtualFileSystem } from '../formats/pak';
-import { buildWorld, type WorldOptions } from '../render/world';
+import { buildWorld, quakeToThree, type WorldOptions } from '../render/world';
 import { BspCollision, HULL_POINT, type CollisionWorld, type Vec3 } from './collision';
 import { buildDemoMap } from './demoMap';
 import { placeEntities, type EntityModelMap } from './entityModels';
 import { resolveLights, type HDLight } from '../hd/lights/LightResolver';
+import { collectMovers } from './entities/BrushEntity';
+import { MoverManager } from './entities/MoverManager';
+import { MoverCollision } from './entities/MoverCollision';
 
 /** Ce qu'une carte doit fournir, qu'elle vienne d'un fichier ou du code. */
 export interface Level {
@@ -32,6 +35,10 @@ export interface Level {
   styleIntensity(style: number): number;
   /** Deux points se voient-ils, sans mur entre eux ? */
   isVisible(from: Vec3, to: Vec3): boolean;
+  /** Anime les portes et plateformes ; sans effet sur une carte qui n'en a pas. */
+  updateEntities(deltaTime: number, playerPosition: Vec3): void;
+  /** État des volumes mobiles, pour la mise au point. */
+  moverStates(): { kind: string; state: string; progress: number; center: Vec3 }[];
   update(time: number): void;
   dispose(): void;
   stats: {
@@ -44,6 +51,8 @@ export interface Level {
     hiddenFaces?: number;
     /** Vrai quand aucune palette n'est montée : les teintes sont inventées. */
     paletteMissing?: boolean;
+    /** Portes, plateformes et boutons animés. */
+    movers?: number;
   };
 }
 
@@ -187,6 +196,14 @@ export function loadBspLevel(
   const sampleLighting = lightingSampler(lightsFromEntities(bsp.entities));
   const pointTrace = collision.world(0, HULL_POINT);
 
+  // Portes, plateformes et boutons : leur géométrie est déjà construite à sa
+  // position fermée, il reste à la déplacer et à la rendre solide.
+  const movers = collectMovers(bsp);
+  const moverManager = new MoverManager(movers);
+  const playerCollision = movers.length
+    ? new MoverCollision(collision.world(0), collision, movers)
+    : collision.world(0);
+
   const { group, placed } = placeEntities(bsp.entities, vfs, palette, entityModels, {
     anisotropy: options.anisotropy,
     ambient: options.ambient,
@@ -200,7 +217,7 @@ export function loadBspLevel(
   return {
     name: path,
     root: world.root,
-    collision: collision.world(0),
+    collision: playerCollision,
     spawn: spawn.origin,
     spawnYaw: spawn.yaw,
     entities: bsp.entities,
@@ -211,6 +228,27 @@ export function loadBspLevel(
     sampleLighting,
     // Entités d'éclairage et surfaces émettrices alimentent la même liste.
     hdLights: [...resolveLights(bsp.entities), ...world.surfaceLights],
+    updateEntities(deltaTime, playerPosition) {
+      if (movers.length === 0) return;
+      moverManager.update(deltaTime, playerPosition);
+      for (const mover of movers) {
+        const group = world.models[mover.modelIndex];
+        if (!group) continue;
+        const [x, y, z] = quakeToThree(mover.offset[0], mover.offset[1], mover.offset[2]);
+        group.position.set(x, y, z);
+      }
+    },
+    moverStates: () =>
+      movers.map((mover) => ({
+        kind: mover.kind,
+        state: mover.state,
+        progress: Number(mover.progress.toFixed(2)),
+        center: [
+          (mover.mins[0] + mover.maxs[0]) / 2,
+          (mover.mins[1] + mover.maxs[1]) / 2,
+          (mover.mins[2] + mover.maxs[2]) / 2,
+        ] as Vec3,
+      })),
     isVisible: (from, to) => {
       // Gabarit ponctuel : on suit un rayon de lumière, pas un joueur.
       const trace = pointTrace.trace(from, to);
@@ -227,7 +265,12 @@ export function loadBspLevel(
       for (const entity of placed) entity.model.dispose();
       world.dispose();
     },
-    stats: { ...world.stats, entities: placed.length, paletteMissing },
+    stats: {
+      ...world.stats,
+      entities: placed.length,
+      paletteMissing,
+      movers: movers.length,
+    },
   };
 }
 
@@ -246,6 +289,10 @@ export function loadDemoLevel(options: WorldOptions): Level {
     isVisible: demo.isVisible,
     setDynamicLights: demo.setDynamicLights,
     setShadow: demo.setShadow,
+    updateEntities: () => {
+      // L'arène de démonstration n'a pas de volume mobile.
+    },
+    moverStates: () => [],
     styleIntensity: demo.styleIntensity,
     update: demo.update,
     dispose: demo.dispose,

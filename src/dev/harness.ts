@@ -134,6 +134,24 @@ export function installHarness(session: Session): void {
       return session.shadows.inspect(session.renderer);
     },
 
+    /** Trace depuis le joueur vers un point : 1 = rien sur le chemin. */
+    traceTo(x: number, y: number, z: number) {
+      const level = session.currentLevel;
+      const player = session.playerRef;
+      if (!level || !player) return null;
+      const result = level.collision.trace(player.state.origin, [x, y, z]);
+      return {
+        fraction: Number(result.fraction.toFixed(3)),
+        touche: result.hit,
+        arrivee: result.endPos.map((v) => Math.round(v)),
+      };
+    },
+
+    /** Portes et plateformes : position, état, avancement. */
+    movers() {
+      return session.currentLevel?.moverStates() ?? [];
+    },
+
     /** Sources dynamiques retenues autour du joueur. */
     lights() {
       return {

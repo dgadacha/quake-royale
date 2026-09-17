@@ -186,6 +186,7 @@ export class Session {
       this.player.update(this.input, delta);
       this.player.applyToCamera(this.camera);
       this.level.update(this.elapsed);
+      this.level.updateEntities(delta, this.player.position);
 
       // Sources dynamiques : la sélection suit le joueur, les intensités
       // suivent les mêmes styles d'animation que les lightmaps.
