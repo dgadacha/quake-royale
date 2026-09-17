@@ -1,7 +1,7 @@
 import { PakArchive, VirtualFileSystem } from './formats/pak';
 import { loadBspLevel, loadDemoLevel, type Level } from './game/level';
 import { Session } from './game/session';
-import { Overlay } from './ui/overlay';
+import { Overlay, type GraphicsRow } from './ui/overlay';
 import { installHarness } from './dev/harness';
 import { loadEntityMapping, type EntityModelMap } from './game/entityModels';
 
@@ -88,7 +88,79 @@ function refreshMenu(note?: string): void {
         return loadBspLevel(vfs, path, session.options, entityModels);
       }, path),
     onFiles: (files) => void addFiles(files),
+    onGraphics: () => showGraphicsPanel(note),
   }, note);
+}
+
+function showGraphicsPanel(note?: string): void {
+  const settings = session.graphicsSettings;
+  const rows: GraphicsRow[] = [
+    {
+      key: 'ambientOcclusion',
+      label: 'Occlusion ambiante',
+      hint: "Assombrit les angles, les recoins et les contacts entre volumes.",
+      kind: 'toggle',
+      value: settings.ambientOcclusion,
+    },
+    {
+      key: 'aoIntensity',
+      label: 'Force de l\'occlusion',
+      kind: 'range',
+      value: settings.aoIntensity,
+      min: 0.2,
+      max: 2,
+      step: 0.05,
+    },
+    {
+      key: 'aoRadius',
+      label: "Portée de l'occlusion",
+      hint: 'En unités de monde. Une portée large creuse les grands volumes.',
+      kind: 'range',
+      value: settings.aoRadius,
+      min: 8,
+      max: 96,
+      step: 2,
+    },
+    {
+      key: 'reflections',
+      label: 'Réflexions',
+      hint: 'Reflets sur les sols et les surfaces liquides, calculés dans l\'image.',
+      kind: 'toggle',
+      value: settings.reflections,
+    },
+    {
+      key: 'reflectionStrength',
+      label: 'Force des réflexions',
+      kind: 'range',
+      value: settings.reflectionStrength,
+      min: 0,
+      max: 1,
+      step: 0.05,
+    },
+    {
+      key: 'bloom',
+      label: 'Halo lumineux',
+      hint: 'Débordement des sources vives et des surfaces émissives.',
+      kind: 'toggle',
+      value: settings.bloom,
+    },
+    {
+      key: 'bloomStrength',
+      label: 'Force du halo',
+      kind: 'range',
+      value: settings.bloomStrength,
+      min: 0,
+      max: 1.5,
+      step: 0.05,
+    },
+    { key: 'grain', label: 'Grain', kind: 'toggle', value: settings.grain },
+  ];
+
+  overlay.showGraphics(
+    rows,
+    (key, value) => session.setGraphics({ [key]: value }),
+    () => refreshMenu(note),
+  );
 }
 
 async function addFiles(files: FileList): Promise<void> {

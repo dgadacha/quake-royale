@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Contents } from '../formats/bsp';
 import { createPostProcessing, type PostProcessing } from '../render/postfx';
+import { loadGraphics, saveGraphics, type GraphicsSettings } from '../render/graphics';
 import { Viewmodel } from '../render/viewmodel';
 import shotgunUrl from '../../assets/shotgun.glb?url';
 import { defaultWorldOptions, quakeToThree, type WorldOptions } from '../render/world';
@@ -26,6 +27,7 @@ export class Session {
   readonly options: WorldOptions;
 
   private post: PostProcessing;
+  private graphics: GraphicsSettings = loadGraphics();
   readonly viewmodel: Viewmodel;
   private player: Player | null = null;
   private level: Level | null = null;
@@ -66,6 +68,7 @@ export class Session {
       camera: this.viewmodel.camera,
     });
     this.input = new InputManager(canvas);
+    this.post.setGraphics(this.graphics);
 
     // L'arme est volumineuse : elle se charge en tâche de fond et apparaît
     // dès qu'elle est prête, sans retarder l'entrée dans le niveau.
@@ -78,6 +81,18 @@ export class Session {
 
   setStatsListener(listener: (stats: SessionStats) => void): void {
     this.onStats = listener;
+  }
+
+  get graphicsSettings(): GraphicsSettings {
+    return { ...this.graphics };
+  }
+
+  /** Applique un réglage d'image et le conserve pour les sessions suivantes. */
+  setGraphics(settings: Partial<GraphicsSettings>): GraphicsSettings {
+    this.graphics = { ...this.graphics, ...settings };
+    this.post.setGraphics(this.graphics);
+    saveGraphics(this.graphics);
+    return { ...this.graphics };
   }
 
   setLevel(level: Level): void {

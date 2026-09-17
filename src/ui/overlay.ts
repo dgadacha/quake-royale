@@ -2,6 +2,18 @@ export interface MenuHandlers {
   onDemo(): void;
   onMap(path: string): void;
   onFiles(files: FileList): void;
+  onGraphics(): void;
+}
+
+export interface GraphicsRow {
+  key: string;
+  label: string;
+  hint?: string;
+  kind: 'toggle' | 'range';
+  value: boolean | number;
+  min?: number;
+  max?: number;
+  step?: number;
 }
 
 /** Écrans d'accueil, de chargement et affichage de jeu. */
@@ -54,6 +66,11 @@ export class Overlay {
         Arène de démonstration
         <span class="hint">Niveau généré par le code, éclairage cuit, eau et escaliers</span>
       </button>
+      <h2>Image</h2>
+      <button data-action="graphics">
+        Paramètres graphiques
+        <span class="hint">Occlusion ambiante, réflexions, halo lumineux, grain</span>
+      </button>
       <h2>Vos données</h2>
       <div class="drop" data-action="drop">
         Déposez ici un fichier <b>.pak</b> ou une carte <b>.bsp</b><br />
@@ -70,6 +87,7 @@ export class Overlay {
     this.status = panel.querySelector('.status');
 
     panel.querySelector('[data-action="demo"]')?.addEventListener('click', handlers.onDemo);
+    panel.querySelector('[data-action="graphics"]')?.addEventListener('click', handlers.onGraphics);
 
     const drop = panel.querySelector('[data-action="drop"]') as HTMLElement;
     const picker = document.createElement('input');
@@ -118,6 +136,81 @@ export class Overlay {
       button.addEventListener('click', () => onMap(map));
       container.append(button);
     }
+  }
+
+  /** Panneau de réglages d'image, appliqués immédiatement. */
+  showGraphics(
+    rows: GraphicsRow[],
+    onChange: (key: string, value: boolean | number) => void,
+    onBack: () => void,
+  ): void {
+    const screen = this.newScreen();
+    const panel = document.createElement('div');
+    panel.className = 'panel';
+    panel.innerHTML = `
+      <h1>Image</h1>
+      <p class="subtitle">
+        Les réglages s'appliquent tout de suite et sont conservés pour les
+        prochaines sessions.
+      </p>
+    `;
+
+    for (const row of rows) {
+      const line = document.createElement('div');
+      line.className = 'setting';
+
+      const label = document.createElement('div');
+      label.className = 'label';
+      label.innerHTML = `${row.label}${row.hint ? `<span>${row.hint}</span>` : ''}`;
+      line.append(label);
+
+      const control = document.createElement('div');
+      control.className = 'control';
+
+      if (row.kind === 'toggle') {
+        const button = document.createElement('button');
+        button.className = 'toggle';
+        const paint = (on: boolean) => {
+          button.textContent = on ? 'Activé' : 'Désactivé';
+          button.dataset.on = String(on);
+        };
+        paint(row.value as boolean);
+        button.addEventListener('click', () => {
+          const next = button.dataset.on !== 'true';
+          paint(next);
+          onChange(row.key, next);
+        });
+        control.append(button);
+      } else {
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = String(row.min ?? 0);
+        slider.max = String(row.max ?? 1);
+        slider.step = String(row.step ?? 0.05);
+        slider.value = String(row.value);
+
+        const amount = document.createElement('div');
+        amount.className = 'amount';
+        amount.textContent = String(row.value);
+
+        slider.addEventListener('input', () => {
+          const value = Number.parseFloat(slider.value);
+          amount.textContent = value.toFixed(value < 10 ? 2 : 0);
+          onChange(row.key, value);
+        });
+        control.append(slider, amount);
+      }
+
+      line.append(control);
+      panel.append(line);
+    }
+
+    const back = document.createElement('button');
+    back.textContent = 'Retour';
+    back.style.marginTop = '20px';
+    back.addEventListener('click', onBack);
+    panel.append(back);
+    screen.append(panel);
   }
 
   showLoading(label: string): void {

@@ -3,6 +3,11 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
+import { aoBlurShader, aoShader } from './ao';
+import { createGBuffer, gbufferMaterial } from './gbuffer';
+import { ssrShader } from './ssr';
+import type { GraphicsSettings } from './graphics';
 
 /**
  * Passe finale : exposition, tonemapping ACES, teinte d'immersion,
@@ -82,6 +87,38 @@ const finalShader = {
   `,
 };
 
+/** Multiplie l'image par la carte d'occlusion. */
+const applyOcclusionShader = {
+  uniforms: {
+    tDiffuse: { value: null as THREE.Texture | null },
+    tOcclusion: { value: null as THREE.Texture | null },
+    uEnabled: { value: 1 },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    precision highp float;
+    uniform sampler2D tDiffuse;
+    uniform sampler2D tOcclusion;
+    uniform float uEnabled;
+    varying vec2 vUv;
+    void main() {
+      vec3 color = texture2D(tDiffuse, vUv).rgb;
+      if (uEnabled > 0.5) {
+        float occlusion = texture2D(tOcclusion, vUv).r;
+        // L'occlusion creuse les recoins sans éteindre les zones éclairées.
+        color *= mix(1.0, occlusion, 0.85);
+      }
+      gl_FragColor = vec4(color, 1.0);
+    }
+  `,
+};
+
 export interface ViewmodelLayer {
   scene: THREE.Scene;
   camera: THREE.Camera;
@@ -94,6 +131,7 @@ export interface PostProcessing {
   setUnderwater(amount: number, tint: THREE.Color): void;
   setDamage(amount: number): void;
   setBloom(strength: number): void;
+  setGraphics(settings: GraphicsSettings): void;
   dispose(): void;
 }
 
@@ -110,8 +148,45 @@ export function createPostProcessing(
     samples: 4,
   });
 
+  // Normales et distances du décor : socle de l'occlusion et des reflets.
+  const gbuffer = createGBuffer(size.x, size.y);
+  const occlusionTarget = new THREE.WebGLRenderTarget(size.x, size.y, {
+    type: THREE.HalfFloatType,
+    colorSpace: THREE.NoColorSpace,
+    depthBuffer: false,
+  });
+  const occlusionBlurTarget = occlusionTarget.clone();
+  let effectScale = 1;
+  let viewWidth = size.x;
+  let viewHeight = size.y;
+
+  /** Redimensionne les cibles d'occlusion selon l'échelle de rendu choisie. */
+  const resizeOcclusionTargets = () => {
+    const width = Math.max(64, Math.round(viewWidth * effectScale));
+    const height = Math.max(64, Math.round(viewHeight * effectScale));
+    occlusionTarget.setSize(width, height);
+    occlusionBlurTarget.setSize(width, height);
+    occlusionMaterial.uniforms.uResolution.value.set(width, height);
+    blurMaterial.uniforms.uTexel.value.set(1 / width, 1 / height);
+  };
+
+  const occlusionQuad = new FullScreenQuad(new THREE.ShaderMaterial(aoShader));
+  const blurQuad = new FullScreenQuad(new THREE.ShaderMaterial(aoBlurShader));
+  const occlusionMaterial = occlusionQuad.material as THREE.ShaderMaterial;
+  const blurMaterial = blurQuad.material as THREE.ShaderMaterial;
+  occlusionMaterial.uniforms.tNormalDepth.value = gbuffer.texture;
+  blurMaterial.uniforms.tNormalDepth.value = gbuffer.texture;
+
   const composer = new EffectComposer(renderer, target);
   composer.addPass(new RenderPass(scene, camera));
+
+  const applyOcclusion = new ShaderPass(applyOcclusionShader);
+  applyOcclusion.uniforms.tOcclusion.value = occlusionBlurTarget.texture;
+  composer.addPass(applyOcclusion);
+
+  const reflections = new ShaderPass(ssrShader);
+  reflections.uniforms.tNormalDepth.value = gbuffer.texture;
+  composer.addPass(reflections);
 
   // L'arme tenue en main se dessine par-dessus, sur un tampon de profondeur
   // remis à zéro : elle ne peut donc jamais être coupée par un mur proche.
@@ -131,16 +206,78 @@ export function createPostProcessing(
   composer.addPass(final);
 
   let time = 0;
+  let occlusionEnabled = true;
+  const halfExtent = new THREE.Vector2();
+  const worldUpView = new THREE.Vector3();
+
+  /** Demi-ouverture de la caméra, nécessaire pour reconstruire les positions. */
+  const updateCameraUniforms = () => {
+    const perspective = camera as THREE.PerspectiveCamera;
+    const tangent = Math.tan(THREE.MathUtils.degToRad(perspective.fov * 0.5));
+    halfExtent.set(tangent * perspective.aspect, tangent);
+    occlusionMaterial.uniforms.uHalfExtent.value.copy(halfExtent);
+    occlusionMaterial.uniforms.uProjection.value.copy(perspective.projectionMatrix);
+    reflections.uniforms.uHalfExtent.value.copy(halfExtent);
+    reflections.uniforms.uProjection.value.copy(perspective.projectionMatrix);
+
+    // Direction du haut du monde vue depuis la caméra : c'est elle qui
+    // distingue un sol réfléchissant d'un mur.
+    worldUpView.set(0, 1, 0).transformDirection(camera.matrixWorldInverse);
+    reflections.uniforms.uWorldUpView.value.copy(worldUpView);
+  };
+
+  const renderOcclusion = () => {
+    const previousTarget = renderer.getRenderTarget();
+
+    // Le décor seul alimente le tampon : l'arme a sa propre passe.
+    const previousOverride = scene.overrideMaterial;
+    scene.overrideMaterial = gbufferMaterial;
+    renderer.setRenderTarget(gbuffer);
+    renderer.setClearColor(0x000000, 0);
+    renderer.clear(true, true, false);
+    renderer.render(scene, camera);
+    scene.overrideMaterial = previousOverride;
+
+    if (occlusionEnabled) {
+      renderer.setRenderTarget(occlusionTarget);
+      occlusionQuad.render(renderer);
+
+      // Deux passes de flou séparées, moins coûteuses qu'une passe carrée.
+      blurMaterial.uniforms.tDiffuse.value = occlusionTarget.texture;
+      blurMaterial.uniforms.uDirection.value.set(1, 0);
+      renderer.setRenderTarget(occlusionBlurTarget);
+      blurQuad.render(renderer);
+
+      blurMaterial.uniforms.tDiffuse.value = occlusionBlurTarget.texture;
+      blurMaterial.uniforms.uDirection.value.set(0, 1);
+      renderer.setRenderTarget(occlusionTarget);
+      blurQuad.render(renderer);
+
+      applyOcclusion.uniforms.tOcclusion.value = occlusionTarget.texture;
+    }
+
+    renderer.setRenderTarget(previousTarget);
+  };
 
   return {
     composer,
     setSize(width, height) {
       composer.setSize(width, height);
       bloom.setSize(width, height);
+      gbuffer.setSize(width, height);
+      viewWidth = width;
+      viewHeight = height;
+      resizeOcclusionTargets();
     },
     render(deltaTime) {
       time += deltaTime;
       final.uniforms.uTime.value = time;
+
+      if (applyOcclusion.enabled || reflections.enabled) {
+        updateCameraUniforms();
+        renderOcclusion();
+      }
+
       composer.render(deltaTime);
     },
     setUnderwater(amount, tint) {
@@ -154,9 +291,35 @@ export function createPostProcessing(
     setBloom(strength) {
       bloom.strength = strength;
     },
+    setGraphics(settings) {
+      occlusionEnabled = settings.ambientOcclusion;
+      applyOcclusion.enabled = settings.ambientOcclusion;
+      applyOcclusion.uniforms.uEnabled.value = settings.ambientOcclusion ? 1 : 0;
+      occlusionMaterial.uniforms.uIntensity.value = settings.aoIntensity;
+      occlusionMaterial.uniforms.uRadius.value = settings.aoRadius;
+
+      reflections.enabled = settings.reflections;
+      reflections.uniforms.uStrength.value = settings.reflections
+        ? settings.reflectionStrength
+        : 0;
+
+      if (settings.effectScale !== effectScale) {
+        effectScale = settings.effectScale;
+        resizeOcclusionTargets();
+      }
+
+      bloom.enabled = settings.bloom;
+      bloom.strength = settings.bloomStrength;
+      final.uniforms.uGrain.value = settings.grain ? 0.035 : 0;
+    },
     dispose() {
       composer.dispose();
       target.dispose();
+      gbuffer.dispose();
+      occlusionTarget.dispose();
+      occlusionBlurTarget.dispose();
+      occlusionQuad.dispose();
+      blurQuad.dispose();
     },
   };
 }

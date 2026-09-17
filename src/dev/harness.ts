@@ -116,6 +116,12 @@ export function installHarness(session: Session): void {
       return session.viewmodel.getMotion();
     },
 
+    /** Lit ou modifie les réglages d'image. */
+    graphics(settings?: Record<string, unknown>) {
+      if (!settings) return session.graphicsSettings;
+      return session.setGraphics(settings as never);
+    },
+
     level() {
       const level = session.currentLevel;
       return level ? { name: level.name, ...level.stats } : null;
