@@ -308,3 +308,46 @@ kbd {
   width: 32px;
   text-align: right;
 }
+
+.map-filter {
+  width: 100%;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: #171a20;
+  border: 1px solid var(--line);
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+
+.map-filter:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.maps {
+  display: block;
+}
+
+.map-group {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin: 12px 0 6px;
+}
+
+.map-group:first-child {
+  margin-top: 0;
+}
+
+.map-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 6px;
+}
+
+.maps button[data-last="true"] {
+  border-color: var(--accent);
+  color: var(--accent-soft);
+}

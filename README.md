@@ -46,6 +46,25 @@ dans `public/data/manifest.json` :
 sans manifeste. Le dossier `public/data` est ignoré par git : vos fichiers ne
 partent jamais dans le dépôt.
 
+### Charger beaucoup de cartes d'un coup
+
+Copiez vos `.bsp` dans `public/data/maps`, en vrac ou en sous-dossiers, puis :
+
+```bash
+node tools/scan-maps.mjs
+```
+
+L'outil recense ce qui est là, écarte les cartes dont la version de format
+n'est pas prise en charge, et réécrit le manifeste. Le menu les propose alors
+toutes, regroupées par épisode d'après leur nom de fichier, avec un filtre
+au-delà d'une douzaine de cartes et la dernière carte lancée mise en évidence.
+
+Les cartes d'origine se trouvent dans le `pak0.pak` de votre copie du jeu :
+monter l'archive suffit, sans rien copier. Des sources de niveaux publiées
+ailleurs existent également, parfois accompagnées de versions déjà compilées ;
+les fichiers `.map` ne sont pas lisibles tels quels, ils demandent un
+compilateur de cartes, alors que les `.bsp` se chargent directement.
+
 Pour afficher les objets d'une carte, associez les noms d'entités à des modèles
 dans `public/data/entities.json` :
 
@@ -99,8 +118,10 @@ Deux générateurs produisent des données de test, ce qui permet d'exercer les
 parseurs sans aucun fichier extérieur :
 
 ```bash
-node tools/make-test-bsp.mjs   # salle BSP v29 complète, avec ciel et entités
-node tools/make-test-mdl.mjs   # modèle animé quatre images
+node tools/make-test-bsp.mjs       # salle BSP v29 complète, avec ciel et entités
+node tools/make-test-mdl.mjs       # modèle animé quatre images
+node tools/make-test-materials.mjs # deux matériaux haute définition
+node tools/scan-maps.mjs           # recense public/data et écrit le manifeste
 ```
 
 Les fichiers sont écrits dans `public/data` et déclarés dans le manifeste.

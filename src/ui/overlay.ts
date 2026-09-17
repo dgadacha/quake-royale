@@ -1,3 +1,48 @@
+const LAST_MAP_KEY = 'quake-hd.lastMap';
+
+function readLastMap(): string | null {
+  try {
+    return localStorage.getItem(LAST_MAP_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeLastMap(path: string): void {
+  try {
+    localStorage.setItem(LAST_MAP_KEY, path);
+  } catch {
+    // Sans stockage, la carte ne sera simplement pas retenue.
+  }
+}
+
+/** Nom de fichier sans son dossier ni son extension. */
+function shortMapName(path: string): string {
+  return path.replace(/^.*\//, '').replace(/\.bsp$/i, '');
+}
+
+/**
+ * Regroupe les cartes par épisode d'après la convention de nommage des
+ * fichiers. Une centaine de cartes en une seule grille serait illisible.
+ */
+function groupMaps(maps: string[]): [string, string[]][] {
+  const groups = new Map<string, string[]>();
+  for (const map of maps) {
+    const name = shortMapName(map).toLowerCase();
+    const episode = /^e(\d)m\d/.exec(name);
+    const key = episode ? `Épisode ${episode[1]}` : 'Autres';
+    const list = groups.get(key) ?? [];
+    list.push(map);
+    groups.set(key, list);
+  }
+
+  return [...groups.entries()].sort(([a], [b]) => {
+    if (a === 'Autres') return 1;
+    if (b === 'Autres') return -1;
+    return a.localeCompare(b, 'fr');
+  });
+}
+
 export interface MenuHandlers {
   onDemo(): void;
   onMap(path: string): void;
@@ -129,15 +174,64 @@ export class Overlay {
   private renderMaps(container: HTMLElement, maps: string[], onMap: (path: string) => void): void {
     container.innerHTML = '';
     if (maps.length === 0) return;
+
     const heading = document.createElement('h2');
     heading.textContent = `Cartes détectées (${maps.length})`;
     container.before(heading);
-    for (const map of maps) {
-      const button = document.createElement('button');
-      button.textContent = map.replace(/^maps\//, '').replace(/\.bsp$/, '');
-      button.addEventListener('click', () => onMap(map));
-      container.append(button);
+
+    // Un filtre n'a d'intérêt qu'à partir d'un certain nombre de cartes.
+    let filter = '';
+    if (maps.length > 12) {
+      const search = document.createElement('input');
+      search.type = 'search';
+      search.placeholder = 'Filtrer';
+      search.className = 'map-filter';
+      search.addEventListener('input', () => {
+        filter = search.value.trim().toLowerCase();
+        draw();
+      });
+      container.before(search);
     }
+
+    const last = readLastMap();
+
+    const draw = () => {
+      container.innerHTML = '';
+      const kept = maps.filter((map) => !filter || map.toLowerCase().includes(filter));
+
+      for (const [group, entries] of groupMaps(kept)) {
+        const label = document.createElement('div');
+        label.className = 'map-group';
+        label.textContent = group;
+        container.append(label);
+
+        const row = document.createElement('div');
+        row.className = 'map-row';
+        for (const map of entries) {
+          const button = document.createElement('button');
+          button.textContent = shortMapName(map);
+          if (map === last) {
+            button.dataset.last = 'true';
+            button.title = 'Dernière carte lancée';
+          }
+          button.addEventListener('click', () => {
+            writeLastMap(map);
+            onMap(map);
+          });
+          row.append(button);
+        }
+        container.append(row);
+      }
+
+      if (kept.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'status';
+        empty.textContent = 'Aucune carte ne correspond.';
+        container.append(empty);
+      }
+    };
+
+    draw();
   }
 
   /** Panneau de réglages d'image, appliqués immédiatement. */
