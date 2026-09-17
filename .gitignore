@@ -1,8 +1,10 @@
 node_modules
 dist
 reference/
-public/data/*
-!public/data/README.md
-public/materials/*
-!public/materials/README.md
 .DS_Store
+
+# Données du jeu : elles restent sur votre machine.
+# tools/fetch-maps.mjs et tools/scan-maps.mjs les installent en local.
+public/data/maps/*.bsp
+public/data/*.pak
+public/data/**/*.pak

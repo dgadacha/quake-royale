@@ -1,0 +1,31 @@
+{
+  "basePath": "materials/",
+  "materials": [
+    {
+      "id": "test_stone",
+      "baseColor": "test_stone/basecolor.png",
+      "normal": "test_stone/normal.png",
+      "roughness": "test_stone/roughness.png",
+      "ao": "test_stone/ao.png",
+      "metalnessValue": 0,
+      "normalScale": 0.8,
+      "textureScale": 1,
+      "surface": "stone"
+    },
+    {
+      "id": "test_metal",
+      "baseColor": "test_metal/basecolor.png",
+      "normal": "test_metal/normal.png",
+      "roughness": "test_metal/roughness.png",
+      "ao": "test_metal/ao.png",
+      "metalnessValue": 0.85,
+      "normalScale": 0.8,
+      "textureScale": 1,
+      "surface": "metal"
+    }
+  ],
+  "assign": {
+    "test_wall": "test_stone",
+    "test_floor": "test_metal"
+  }
+}
