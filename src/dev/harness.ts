@@ -134,6 +134,14 @@ export function installHarness(session: Session): void {
       return session.shadows.inspect(session.renderer);
     },
 
+    /** Visibilité : feuille courante et faces réellement dessinées. */
+    visibility(enabled?: boolean) {
+      const level = session.currentLevel;
+      if (!level) return null;
+      if (enabled !== undefined) level.setVisibilityEnabled(enabled);
+      return level.visibilityInfo();
+    },
+
     /** Trace depuis le joueur vers un point : 1 = rien sur le chemin. */
     traceTo(x: number, y: number, z: number) {
       const level = session.currentLevel;

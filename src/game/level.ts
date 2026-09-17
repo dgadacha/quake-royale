@@ -7,6 +7,7 @@ import { BspCollision, HULL_POINT, type CollisionWorld, type Vec3 } from './coll
 import { buildDemoMap } from './demoMap';
 import { placeEntities, type EntityModelMap } from './entityModels';
 import { resolveLights, type HDLight } from '../hd/lights/LightResolver';
+import { buildFaceLeafIndex, VisibilitySet } from '../render/pvs';
 import { collectMovers } from './entities/BrushEntity';
 import { MoverManager } from './entities/MoverManager';
 import { MoverCollision } from './entities/MoverCollision';
@@ -39,6 +40,10 @@ export interface Level {
   updateEntities(deltaTime: number, playerPosition: Vec3): void;
   /** État des volumes mobiles, pour la mise au point. */
   moverStates(): { kind: string; state: string; progress: number; center: Vec3 }[];
+  /** Restreint le dessin à ce qui est visible depuis un point. */
+  updateVisibility(playerPosition: Vec3): void;
+  visibilityInfo(): { leaf: number; drawn: number; total: number; enabled: boolean };
+  setVisibilityEnabled(enabled: boolean): void;
   update(time: number): void;
   dispose(): void;
   stats: {
@@ -198,6 +203,15 @@ export function loadBspLevel(
 
   // Portes, plateformes et boutons : leur géométrie est déjà construite à sa
   // position fermée, il reste à la déplacer et à la rendre solide.
+  // Visibilité précalculée : la carte sait déjà ce qu'on peut apercevoir
+  // depuis chaque endroit, il suffit de s'en servir.
+  const visibility = new VisibilitySet(bsp);
+  const faceLeafs = buildFaceLeafIndex(bsp);
+  const visibleFaces = new Uint8Array(bsp.faces.length);
+  let currentLeaf = -1;
+  let visibilityEnabled = visibility.hasData;
+  void faceLeafs;
+
   const movers = collectMovers(bsp);
   const moverManager = new MoverManager(movers);
   const playerCollision = movers.length
@@ -236,6 +250,39 @@ export function loadBspLevel(
         if (!group) continue;
         const [x, y, z] = quakeToThree(mover.offset[0], mover.offset[1], mover.offset[2]);
         group.position.set(x, y, z);
+      }
+    },
+    updateVisibility(playerPosition) {
+      if (!visibilityEnabled) return;
+
+      const leaf = visibility.findLeaf(playerPosition);
+      // Rien ne change tant qu'on reste dans la même feuille : inutile de
+      // reconstruire les index à chaque image.
+      if (leaf === currentLeaf) return;
+      currentLeaf = leaf;
+
+      const set = visibility.visibleFrom(leaf);
+      visibleFaces.fill(0);
+      for (let index = 1; index < bsp.leafs.length; index++) {
+        if (!VisibilitySet.isVisible(set, index)) continue;
+        const candidate = bsp.leafs[index];
+        for (let i = 0; i < candidate.markSurfaceCount; i++) {
+          visibleFaces[bsp.markSurfaces[candidate.firstMarkSurface + i]] = 1;
+        }
+      }
+      world.setVisibleFaces(visibleFaces);
+    },
+    visibilityInfo: () => ({
+      leaf: currentLeaf,
+      drawn: world.getDrawnFaces(),
+      total: world.stats.faces,
+      enabled: visibilityEnabled,
+    }),
+    setVisibilityEnabled(enabled) {
+      visibilityEnabled = enabled && visibility.hasData;
+      if (!visibilityEnabled) {
+        world.setVisibleFaces(null);
+        currentLeaf = -1;
       }
     },
     moverStates: () =>
@@ -292,6 +339,17 @@ export function loadDemoLevel(options: WorldOptions): Level {
     updateEntities: () => {
       // L'arène de démonstration n'a pas de volume mobile.
     },
+    updateVisibility: () => {
+      // L'arène de démonstration est construite par le code : elle n'a pas
+      // d'arbre de visibilité, tout y est dessiné.
+    },
+    visibilityInfo: () => ({
+      leaf: -1,
+      drawn: demo.stats.faces,
+      total: demo.stats.faces,
+      enabled: false,
+    }),
+    setVisibilityEnabled: () => {},
     moverStates: () => [],
     styleIntensity: demo.styleIntensity,
     update: demo.update,

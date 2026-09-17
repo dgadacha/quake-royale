@@ -66,6 +66,8 @@ interface FaceGeometry {
   tangents: number[];
   indices: number[];
   vertexCount: number;
+  /** Emplacement de chaque face dans l'index, pour n'en dessiner qu'une part. */
+  faceRanges: { face: number; start: number; count: number }[];
 }
 
 function newFaceGeometry(): FaceGeometry {
@@ -78,6 +80,7 @@ function newFaceGeometry(): FaceGeometry {
     tangents: [],
     indices: [],
     vertexCount: 0,
+    faceRanges: [],
   };
 }
 
@@ -200,6 +203,9 @@ export interface BuiltWorld {
   /** Sources déduites des surfaces émettrices de la carte. */
   surfaceLights: HDLight[];
   setFlashlight(position: THREE.Vector3, color: THREE.Color, radius: number): void;
+  /** Restreint le dessin aux faces retenues ; null rétablit tout. */
+  setVisibleFaces(visible: Uint8Array | null): void;
+  getDrawnFaces(): number;
   setDynamicLights(count: number, diffuse: number, specular: number): void;
   setShadow(
     map: THREE.Texture,
@@ -282,6 +288,20 @@ export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions
   root.name = 'world';
   const models: THREE.Group[] = [];
   const allMaterials: THREE.ShaderMaterial[] = [];
+
+  /**
+   * Lots du monde dont on peut ne dessiner qu'une partie.
+   * L'index complet reste en mémoire ; à chaque changement de visibilité on
+   * recopie les seules faces retenues au début d'un tampon de travail, et la
+   * portée de dessin s'arrête là.
+   */
+  interface VisibleBatch {
+    geometry: THREE.BufferGeometry;
+    ranges: { face: number; start: number; count: number }[];
+    fullIndex: Uint32Array;
+    work: THREE.BufferAttribute;
+  }
+  const visibleBatches: VisibleBatch[] = [];
   const animatedMaterials: { material: THREE.ShaderMaterial; frames: number[] }[] = [];
   let faceCount = 0;
   let hdApplied = 0;
@@ -465,9 +485,15 @@ export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions
       }
       geometry.vertexCount += face.edgeCount;
 
+      const indexStart = geometry.indices.length;
       for (let i = 1; i < face.edgeCount - 1; i++) {
         geometry.indices.push(first, first + i, first + i + 1);
       }
+      geometry.faceRanges.push({
+        face: model.firstFace + f,
+        start: indexStart,
+        count: geometry.indices.length - indexStart,
+      });
     }
 
     for (const bucket of buckets.values()) {
@@ -507,6 +533,22 @@ export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions
         if (frames && frames.length > 1) {
           animatedMaterials.push({ material, frames });
         }
+      }
+
+      // Seul le monde est soumis à la visibilité précalculée : les portes et
+      // les plateformes ne figurent pas dans les feuilles de l'arbre.
+      if (modelIndex === 0 && bucket.geometry.faceRanges.length > 0) {
+        const fullIndex = Uint32Array.from(bucket.geometry.indices);
+        const work = new THREE.BufferAttribute(new Uint32Array(fullIndex.length), 1);
+        work.setUsage(THREE.DynamicDrawUsage);
+        work.array.set(fullIndex);
+        geometry.setIndex(work);
+        visibleBatches.push({
+          geometry,
+          ranges: bucket.geometry.faceRanges,
+          fullIndex,
+          work,
+        });
       }
 
       const mesh = new THREE.Mesh(geometry, material);
@@ -568,6 +610,39 @@ export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions
     }
   };
 
+  let drawnFaces = faceCount;
+
+  /**
+   * Restreint le dessin aux faces retenues. Un tableau vide rétablit tout,
+   * ce qui sert de filet quand la carte ne porte pas de données de visibilité.
+   */
+  const setVisibleFaces = (visible: Uint8Array | null) => {
+    if (!visible) {
+      for (const batch of visibleBatches) {
+        batch.work.array.set(batch.fullIndex);
+        batch.work.needsUpdate = true;
+        batch.geometry.setDrawRange(0, batch.fullIndex.length);
+      }
+      drawnFaces = faceCount;
+      return;
+    }
+
+    let drawn = 0;
+    for (const batch of visibleBatches) {
+      const target = batch.work.array as Uint32Array;
+      let written = 0;
+      for (const range of batch.ranges) {
+        if (!visible[range.face]) continue;
+        target.set(batch.fullIndex.subarray(range.start, range.start + range.count), written);
+        written += range.count;
+        drawn++;
+      }
+      batch.work.needsUpdate = true;
+      batch.geometry.setDrawRange(0, written);
+    }
+    drawnFaces = drawn;
+  };
+
   const setDynamicLights = (count: number, diffuse: number, specular: number) => {
     for (const material of allMaterials) {
       const uniforms = material.uniforms;
@@ -617,6 +692,8 @@ export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions
     models,
     surfaceLights,
     setFlashlight,
+    setVisibleFaces,
+    getDrawnFaces: () => drawnFaces,
     setDynamicLights,
     setShadow,
     styleIntensity: (style: number) => styles.intensityOf(style),
