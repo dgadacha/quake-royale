@@ -20,6 +20,9 @@ export interface SurfaceUniformSettings {
   emissiveStrength: number;
   detailStrength: number;
   atlasSize: number;
+  /** Tableaux partagés des sources dynamiques, mis à jour chaque image. */
+  lightPositions: THREE.Vector4[];
+  lightColors: THREE.Vector4[];
 }
 
 export function createWorldMaterial(
@@ -67,6 +70,11 @@ export function createWorldMaterial(
       uFlashPos: { value: new THREE.Vector3() },
       uFlashColor: { value: new THREE.Color(0, 0, 0) },
       uFlashRadius: { value: 0 },
+      uLightPositions: { value: settings.lightPositions },
+      uLightColors: { value: settings.lightColors },
+      uLightCount: { value: 0 },
+      uDynamicDiffuse: { value: 0.32 },
+      uDynamicSpecular: { value: 1.0 },
     },
   });
 }

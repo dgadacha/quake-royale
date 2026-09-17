@@ -15,6 +15,7 @@ import {
   type LiquidKind,
 } from './materials';
 import type { HDMaterialManager } from '../hd/materials/HDMaterialManager';
+import { MAX_ACTIVE_LIGHTS } from '../hd/lights/HDLightManager';
 
 /** Quake place Z vers le haut : on bascule dans le repère de three. */
 export function quakeToThree(x: number, y: number, z: number): [number, number, number] {
@@ -34,6 +35,9 @@ export interface WorldOptions {
   atlasSize: number;
   /** Couche haute définition, consultée surface par surface. Absente, rien ne change. */
   hdMaterials?: HDMaterialManager | null;
+  /** Tableaux partagés des sources dynamiques, mis à jour chaque image. */
+  lightPositions: THREE.Vector4[];
+  lightColors: THREE.Vector4[];
 }
 
 export const defaultWorldOptions = (anisotropy: number): WorldOptions => ({
@@ -48,6 +52,8 @@ export const defaultWorldOptions = (anisotropy: number): WorldOptions => ({
   detailStrength: 0.35,
   atlasSize: 2048,
   hdMaterials: null,
+  lightPositions: Array.from({ length: MAX_ACTIVE_LIGHTS }, () => new THREE.Vector4()),
+  lightColors: Array.from({ length: MAX_ACTIVE_LIGHTS }, () => new THREE.Vector4()),
 });
 
 interface FaceGeometry {
@@ -191,6 +197,8 @@ export interface BuiltWorld {
   /** Un groupe par modèle du BSP, l'indice 0 étant la géométrie fixe. */
   models: THREE.Group[];
   setFlashlight(position: THREE.Vector3, color: THREE.Color, radius: number): void;
+  setDynamicLights(count: number, diffuse: number, specular: number): void;
+  styleIntensity(style: number): number;
   update(time: number): void;
   dispose(): void;
   stats: {
@@ -428,6 +436,16 @@ export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions
     }
   };
 
+  const setDynamicLights = (count: number, diffuse: number, specular: number) => {
+    for (const material of allMaterials) {
+      const uniforms = material.uniforms;
+      if (!uniforms.uLightCount) continue;
+      uniforms.uLightCount.value = count;
+      uniforms.uDynamicDiffuse.value = diffuse;
+      uniforms.uDynamicSpecular.value = specular;
+    }
+  };
+
   const update = (time: number) => {
     styles.update(time);
     for (const material of allMaterials) {
@@ -466,6 +484,8 @@ export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions
     root,
     models,
     setFlashlight,
+    setDynamicLights,
+    styleIntensity: (style: number) => styles.intensityOf(style),
     update,
     dispose,
     stats: {

@@ -3,6 +3,7 @@ import { Contents } from '../formats/bsp';
 import { createPostProcessing, type PostProcessing } from '../render/postfx';
 import { loadGraphics, saveGraphics, type GraphicsSettings } from '../render/graphics';
 import { HDMaterialManager } from '../hd/materials/HDMaterialManager';
+import { HDLightManager } from '../hd/lights/HDLightManager';
 import { Viewmodel } from '../render/viewmodel';
 import shotgunUrl from '../../assets/shotgun.glb?url';
 import { defaultWorldOptions, quakeToThree, type WorldOptions } from '../render/world';
@@ -31,6 +32,7 @@ export class Session {
   private graphics: GraphicsSettings = loadGraphics();
   readonly viewmodel: Viewmodel;
   readonly hdMaterials: HDMaterialManager;
+  readonly hdLights = new HDLightManager();
   private player: Player | null = null;
   private level: Level | null = null;
   private clock = new THREE.Clock();
@@ -65,6 +67,10 @@ export class Session {
     this.options = defaultWorldOptions(this.renderer.capabilities.getMaxAnisotropy());
     this.hdMaterials = new HDMaterialManager(this.renderer.capabilities.getMaxAnisotropy());
     this.options.hdMaterials = this.hdMaterials;
+    // Les matériaux lisent directement les tableaux du gestionnaire : aucune
+    // recopie n'est nécessaire d'une image à l'autre.
+    this.options.lightPositions = this.hdLights.uniforms.positions;
+    this.options.lightColors = this.hdLights.uniforms.colors;
 
     this.viewmodel = new Viewmodel(
       window.innerWidth / window.innerHeight,
@@ -99,6 +105,11 @@ export class Session {
   setGraphics(settings: Partial<GraphicsSettings>): GraphicsSettings {
     this.graphics = { ...this.graphics, ...settings };
     this.post.setGraphics(this.graphics);
+    this.hdLights.setBudget({
+      maxLights: this.graphics.dynamicLights ? this.graphics.maxLights : 0,
+      diffuse: this.graphics.lightDiffuse,
+      specular: this.graphics.lightSpecular,
+    });
     saveGraphics(this.graphics);
     return { ...this.graphics };
   }
@@ -111,6 +122,13 @@ export class Session {
     this.level = level;
     this.scene.add(level.root);
     this.player = new Player(level.collision, level.spawn, level.spawnYaw);
+    this.hdLights.setLights(level.hdLights);
+    this.hdLights.setVisibilityTest((from, to) => level.isVisible(from, to));
+    this.hdLights.setBudget({
+      maxLights: this.graphics.dynamicLights ? this.graphics.maxLights : 0,
+      diffuse: this.graphics.lightDiffuse,
+      specular: this.graphics.lightSpecular,
+    });
     this.elapsed = 0;
 
     // Première photographie du décor avant la toute première image.
@@ -162,6 +180,17 @@ export class Session {
       this.player.update(this.input, delta);
       this.player.applyToCamera(this.camera);
       this.level.update(this.elapsed);
+
+      // Sources dynamiques : la sélection suit le joueur, les intensités
+      // suivent les mêmes styles d'animation que les lightmaps.
+      this.hdLights.update(this.player.position, delta, (style) =>
+        this.level!.styleIntensity(style),
+      );
+      this.level.setDynamicLights(
+        this.hdLights.activeCount,
+        this.hdLights.diffuseAmount,
+        this.hdLights.specularAmount,
+      );
 
       // Lampe portée : le halo suit la tête, jamais la direction de visée
       // pour ne pas écraser le modelé des lightmaps. Le temps d'un coup de

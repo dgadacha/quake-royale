@@ -157,6 +157,12 @@ export class LightStyles {
     this.update(0);
   }
 
+  /** Intensité courante d'un style, pour les sources dynamiques du même style. */
+  intensityOf(style: number): number {
+    if (style < 0 || style >= STYLE_COUNT) return 1;
+    return this.data[style * 4] / 255;
+  }
+
   update(time: number): void {
     for (let i = 0; i < STYLE_COUNT; i++) {
       const value = Math.max(0, Math.min(1, this.patterns[i](time)));

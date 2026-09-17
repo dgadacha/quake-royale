@@ -8,6 +8,7 @@ import { BoxCollision, type CollisionBox } from './boxCollision';
 import type { CollisionWorld, Vec3 } from './collision';
 import { lightingSampler, type LightingSample } from './level';
 import { demoPalette, demoTexture } from './demoTextures';
+import type { HDLight } from '../hd/lights/LightResolver';
 
 type Axis = '+x' | '-x' | '+y' | '-y' | '+z' | '-z';
 
@@ -216,6 +217,11 @@ export interface DemoWorld {
   spawn: Vec3;
   spawnYaw: number;
   setFlashlight(position: THREE.Vector3, color: THREE.Color, radius: number): void;
+  setDynamicLights(count: number, diffuse: number, specular: number): void;
+  styleIntensity(style: number): number;
+  /** Sources de la salle, converties pour l'éclairage dynamique. */
+  hdLights: HDLight[];
+  isVisible(from: Vec3, to: Vec3): boolean;
   sampleLighting(position: Vec3): LightingSample;
   update(time: number): void;
   dispose(): void;
@@ -395,6 +401,26 @@ export function buildDemoMap(options: WorldOptions): DemoWorld {
     spawn,
     spawnYaw,
     sampleLighting,
+    styleIntensity: (style: number) => styles.intensityOf(style),
+    isVisible: (from: Vec3, to: Vec3) => !collision.rayBlocked(from, to),
+    hdLights: lights.map((light) => ({
+      position: light.position,
+      color: light.color.clone(),
+      intensity: light.intensity,
+      radius: light.radius,
+      category: light.intensity >= 1 ? 'primary' : 'secondary',
+      style: light.style,
+      classname: 'light',
+    })),
+    setDynamicLights(count: number, diffuse: number, specular: number) {
+      for (const material of materials) {
+        const uniforms = material.uniforms;
+        if (!uniforms.uLightCount) continue;
+        uniforms.uLightCount.value = count;
+        uniforms.uDynamicDiffuse.value = diffuse;
+        uniforms.uDynamicSpecular.value = specular;
+      }
+    },
     setFlashlight(position, color, radius) {
       for (const material of materials) {
         const uniforms = material.uniforms;

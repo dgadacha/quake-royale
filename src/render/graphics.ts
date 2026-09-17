@@ -10,6 +10,12 @@ export interface GraphicsSettings {
   grain: boolean;
   /** Échelle de rendu des effets lourds, entre 0.5 et 1. */
   effectScale: number;
+  /** Sources dynamiques calculées simultanément. */
+  dynamicLights: boolean;
+  maxLights: number;
+  /** Dosages de l'apport dynamique, par-dessus l'éclairage cuit. */
+  lightDiffuse: number;
+  lightSpecular: number;
 }
 
 export const defaultGraphics = (): GraphicsSettings => ({
@@ -25,6 +31,11 @@ export const defaultGraphics = (): GraphicsSettings => ({
   // L'occlusion est calculée en résolution réduite puis lissée : le flou la
   // rattrape entièrement, pour un quart du coût.
   effectScale: 0.5,
+  dynamicLights: true,
+  maxLights: 8,
+  // Les lightmaps portent déjà le diffus : une pleine dose délaverait tout.
+  lightDiffuse: 0.32,
+  lightSpecular: 1.0,
 });
 
 const STORAGE_KEY = 'quake-hd.graphics';

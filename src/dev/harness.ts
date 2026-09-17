@@ -129,6 +129,15 @@ export function installHarness(session: Session): void {
       return session.viewmodel.getMotion();
     },
 
+    /** Sources dynamiques retenues autour du joueur. */
+    lights() {
+      return {
+        actives: session.hdLights.activeCount,
+        total: session.hdLights.totalCount,
+        budget: session.hdLights.currentBudget,
+      };
+    },
+
     /** Lit ou modifie les réglages d'image. */
     graphics(settings?: Record<string, unknown>) {
       if (!settings) return session.graphicsSettings;

@@ -72,6 +72,13 @@ uniform vec3 uFlashPos;
 uniform vec3 uFlashColor;
 uniform float uFlashRadius;
 
+#define MAX_LIGHTS 12
+uniform vec4 uLightPositions[MAX_LIGHTS];
+uniform vec4 uLightColors[MAX_LIGHTS];
+uniform int uLightCount;
+uniform float uDynamicDiffuse;
+uniform float uDynamicSpecular;
+
 varying vec2 vUv;
 varying vec2 vLightUv;
 varying vec4 vStyles;
@@ -163,6 +170,32 @@ void main() {
     vec3 emissive = texture2D(uEmissive, vUv).rgb;
     float pulse = 0.92 + 0.08 * sin(uTime * 6.0 + vWorldPos.x * 0.05);
     color += emissive * uEmissiveStrength * pulse;
+  }
+
+  // Sources dynamiques du niveau.
+  //
+  // Les lightmaps portent déjà le diffus de ces mêmes sources : en réappliquer
+  // la totalité délaverait la scène. Leur apport réel est ailleurs, dans le
+  // reflet spéculaire que l'éclairage cuit ne peut pas contenir, et dans la
+  // couleur, qu'une lightmap en niveaux de gris ne sait pas porter.
+  for (int i = 0; i < MAX_LIGHTS; i++) {
+    if (i >= uLightCount) break;
+
+    vec3 toLight = uLightPositions[i].xyz - vWorldPos;
+    float lightDistance = length(toLight);
+    float lightRadius = uLightPositions[i].w;
+    if (lightDistance >= lightRadius || lightRadius <= 0.0) continue;
+
+    vec3 lightVector = toLight / lightDistance;
+    float attenuation = pow(1.0 - lightDistance / lightRadius, 2.0);
+    vec3 energy = uLightColors[i].rgb * uLightColors[i].a * attenuation;
+
+    float lambert = max(dot(normal, lightVector), 0.0);
+    color += albedo.rgb * energy * lambert * uDynamicDiffuse;
+
+    vec3 lightHalf = normalize(lightVector + viewDir);
+    float lightSpec = pow(max(dot(normal, lightHalf), 0.0), gloss) * (1.0 - roughness);
+    color += energy * lightSpec * uDynamicSpecular;
   }
 
   // Lampe attachée au joueur : évite les couloirs totalement noirs.

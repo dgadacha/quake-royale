@@ -3,9 +3,10 @@ import { parseBsp, type BspEntity } from '../formats/bsp';
 import { Palette } from '../formats/palette';
 import type { VirtualFileSystem } from '../formats/pak';
 import { buildWorld, type WorldOptions } from '../render/world';
-import { BspCollision, type CollisionWorld, type Vec3 } from './collision';
+import { BspCollision, HULL_POINT, type CollisionWorld, type Vec3 } from './collision';
 import { buildDemoMap } from './demoMap';
 import { placeEntities, type EntityModelMap } from './entityModels';
+import { resolveLights, type HDLight } from '../hd/lights/LightResolver';
 
 /** Ce qu'une carte doit fournir, qu'elle vienne d'un fichier ou du code. */
 export interface Level {
@@ -18,6 +19,12 @@ export interface Level {
   setFlashlight(position: THREE.Vector3, color: THREE.Color, radius: number): void;
   /** Éclairage estimé à un point, pour accorder l'arme tenue au décor. */
   sampleLighting(position: Vec3): LightingSample;
+  /** Sources dynamiques de la carte. */
+  hdLights: HDLight[];
+  setDynamicLights(count: number, diffuse: number, specular: number): void;
+  styleIntensity(style: number): number;
+  /** Deux points se voient-ils, sans mur entre eux ? */
+  isVisible(from: Vec3, to: Vec3): boolean;
   update(time: number): void;
   dispose(): void;
   stats: { faces: number; draws: number; textures: number; lightmapPages: number; entities?: number };
@@ -158,6 +165,7 @@ export function loadBspLevel(
   const spawn = findSpawn(bsp.entities);
 
   const sampleLighting = lightingSampler(lightsFromEntities(bsp.entities));
+  const pointTrace = collision.world(0, HULL_POINT);
 
   const { group, placed } = placeEntities(bsp.entities, vfs, palette, entityModels, {
     anisotropy: options.anisotropy,
@@ -181,6 +189,14 @@ export function loadBspLevel(
       for (const entity of placed) entity.model.setFlashlight(position, color, radius);
     },
     sampleLighting,
+    hdLights: resolveLights(bsp.entities),
+    isVisible: (from, to) => {
+      // Gabarit ponctuel : on suit un rayon de lumière, pas un joueur.
+      const trace = pointTrace.trace(from, to);
+      return trace.fraction >= 0.999;
+    },
+    setDynamicLights: world.setDynamicLights,
+    styleIntensity: world.styleIntensity,
     update(time) {
       world.update(time);
       for (const entity of placed) entity.model.animate(time, entity.fps);
@@ -204,6 +220,10 @@ export function loadDemoLevel(options: WorldOptions): Level {
     entities: [],
     setFlashlight: demo.setFlashlight,
     sampleLighting: demo.sampleLighting,
+    hdLights: demo.hdLights,
+    isVisible: demo.isVisible,
+    setDynamicLights: demo.setDynamicLights,
+    styleIntensity: demo.styleIntensity,
     update: demo.update,
     dispose: demo.dispose,
     stats: demo.stats,
