@@ -3,7 +3,7 @@ import { Contents } from '../formats/bsp';
 import { createPostProcessing, type PostProcessing } from '../render/postfx';
 import { Viewmodel } from '../render/viewmodel';
 import shotgunUrl from '../../assets/shotgun.glb?url';
-import { defaultWorldOptions, type WorldOptions } from '../render/world';
+import { defaultWorldOptions, quakeToThree, type WorldOptions } from '../render/world';
 import { InputManager } from './input';
 import type { Level } from './level';
 import { Player } from './player';
@@ -34,6 +34,11 @@ export class Session {
   private frameTimes: number[] = [];
   private elapsed = 0;
   private flashColor = new THREE.Color(0.55, 0.48, 0.38);
+  // Objets réutilisés à chaque image, pour ne rien allouer dans la boucle.
+  private readonly keyDirection = new THREE.Vector3();
+  private readonly keyColor = new THREE.Color();
+  private readonly viewRotation = new THREE.Quaternion();
+  private readonly eyePosition = new THREE.Vector3();
   private underwaterAmount = 0;
   private onStats?: (stats: SessionStats) => void;
 
@@ -84,6 +89,15 @@ export class Session {
     this.scene.add(level.root);
     this.player = new Player(level.collision, level.spawn, level.spawnYaw);
     this.elapsed = 0;
+
+    // Première photographie du décor avant la toute première image.
+    this.viewmodel.captureEnvironment(
+      this.renderer,
+      this.scene,
+      this.player.eyeWorldPosition(this.eyePosition),
+      0,
+      true,
+    );
   }
 
   get currentLevel(): Level | null {
@@ -143,6 +157,20 @@ export class Session {
       this.post.setDamage(this.player.inLava ? 0.35 + Math.sin(this.elapsed * 12) * 0.1 : 0);
 
       if (this.player.consumeAttack()) this.viewmodel.fire();
+
+      // La lumière dominante du niveau est ramenée dans le repère de la vue :
+      // l'arme, qui vit dans une scène fixe, reçoit ainsi sa lumière du côté
+      // où les sources se trouvent réellement dans le décor.
+      const lighting = this.level.sampleLighting(this.player.position);
+      const [kx, ky, kz] = quakeToThree(
+        lighting.direction[0],
+        lighting.direction[1],
+        lighting.direction[2],
+      );
+      this.viewRotation.copy(this.camera.quaternion).invert();
+      this.keyDirection.set(kx, ky, kz).applyQuaternion(this.viewRotation);
+      this.keyColor.copy(lighting.color);
+
       const [aimX, aimY] = this.player.aimDelta;
       this.viewmodel.update(delta, {
         speed: this.player.speed,
@@ -150,8 +178,18 @@ export class Session {
         mouseDeltaX: aimX,
         mouseDeltaY: aimY,
         underwater: this.player.underwater,
-        brightness: this.level.sampleBrightness(this.player.position),
+        brightness: lighting.intensity,
+        keyDirection: this.keyDirection,
+        keyColor: this.keyColor,
       });
+
+      // Reflets : le décor est rephotographié quand le joueur a changé d'endroit.
+      this.viewmodel.captureEnvironment(
+        this.renderer,
+        this.scene,
+        this.player.eyeWorldPosition(this.eyePosition),
+        delta,
+      );
     }
 
     this.post.render(delta);

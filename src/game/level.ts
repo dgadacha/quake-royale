@@ -16,8 +16,8 @@ export interface Level {
   spawnYaw: number;
   entities: BspEntity[];
   setFlashlight(position: THREE.Vector3, color: THREE.Color, radius: number): void;
-  /** Clarté estimée à un point, entre 0 et 1, pour accorder l'arme au décor. */
-  sampleBrightness(position: Vec3): number;
+  /** Éclairage estimé à un point, pour accorder l'arme tenue au décor. */
+  sampleLighting(position: Vec3): LightingSample;
   update(time: number): void;
   dispose(): void;
   stats: { faces: number; draws: number; textures: number; lightmapPages: number; entities?: number };
@@ -51,28 +51,76 @@ interface PointLight {
   position: Vec3;
   radius: number;
   intensity: number;
+  color: THREE.Color;
 }
 
 /**
- * Les entités d'éclairage donnent une bonne approximation de la clarté d'un
+ * Éclairage reçu en un point : sa force, la direction d'où il vient et sa
+ * teinte. L'arme tenue en main ne peut pas s'accorder au décor sans ces trois
+ * informations ; la seule intensité laisse une lumière qui tombe toujours du
+ * même côté, quelle que soit la disposition réelle du niveau.
+ */
+export interface LightingSample {
+  intensity: number;
+  /** Direction du point vers la lumière dominante, dans le repère du jeu. */
+  direction: Vec3;
+  color: THREE.Color;
+}
+
+/**
+ * Les entités d'éclairage donnent une bonne approximation de l'éclairage d'un
  * point, sans avoir à relire l'atlas de lightmaps image par image.
  */
-function brightnessSampler(lights: PointLight[]): (position: Vec3) => number {
-  if (lights.length === 0) return () => 0.4;
+export function lightingSampler(lights: PointLight[]): (position: Vec3) => LightingSample {
+  const fallback = (): LightingSample => ({
+    intensity: 0.4,
+    direction: [0, 0, 1],
+    color: new THREE.Color(1, 0.96, 0.9),
+  });
+  if (lights.length === 0) return fallback;
+
   return (position: Vec3) => {
     let total = 0;
+    const direction: Vec3 = [0, 0, 0];
+    const color = new THREE.Color(0, 0, 0);
+
     for (const light of lights) {
-      const distance = Math.hypot(
-        light.position[0] - position[0],
-        light.position[1] - position[1],
-        light.position[2] - position[2],
-      );
-      if (distance >= light.radius) continue;
-      total += light.intensity * Math.pow(1 - distance / light.radius, 1.5);
-      if (total >= 1) return 1;
+      const dx = light.position[0] - position[0];
+      const dy = light.position[1] - position[1];
+      const dz = light.position[2] - position[2];
+      const distance = Math.hypot(dx, dy, dz);
+      if (distance >= light.radius || distance < 1e-3) continue;
+
+      const contribution = light.intensity * Math.pow(1 - distance / light.radius, 1.5);
+      total += contribution;
+      direction[0] += (dx / distance) * contribution;
+      direction[1] += (dy / distance) * contribution;
+      direction[2] += (dz / distance) * contribution;
+      color.r += light.color.r * contribution;
+      color.g += light.color.g * contribution;
+      color.b += light.color.b * contribution;
     }
-    return Math.min(1, total);
+
+    if (total <= 1e-4) return fallback();
+
+    const length = Math.hypot(direction[0], direction[1], direction[2]);
+    const unit: Vec3 =
+      length > 1e-4
+        ? [direction[0] / length, direction[1] / length, direction[2] / length]
+        : [0, 0, 1];
+    color.multiplyScalar(1 / total);
+
+    return { intensity: Math.min(1, total), direction: unit, color };
   };
+}
+
+/** Teinte d'une entité d'éclairage, exprimée en 0-1 ou en 0-255 selon l'outil. */
+function parseLightColor(entity: BspEntity): THREE.Color {
+  const raw = entity._color ?? entity.color ?? entity._light_color;
+  const parsed = parseVector(raw);
+  if (!parsed) return new THREE.Color(1, 0.95, 0.88);
+  const scale = Math.max(...parsed) > 1.01 ? 1 / 255 : 1;
+  return new THREE.Color(parsed[0] * scale, parsed[1] * scale, parsed[2] * scale);
 }
 
 function lightsFromEntities(entities: BspEntity[]): PointLight[] {
@@ -83,7 +131,12 @@ function lightsFromEntities(entities: BspEntity[]): PointLight[] {
     if (!origin) continue;
     const value = Number.parseFloat(entity.light ?? entity._light ?? '300');
     const intensity = Number.isNaN(value) ? 300 : value;
-    lights.push({ position: origin, radius: Math.max(120, intensity * 1.7), intensity: 0.85 });
+    lights.push({
+      position: origin,
+      radius: Math.max(120, intensity * 1.7),
+      intensity: 0.85,
+      color: parseLightColor(entity),
+    });
   }
   return lights;
 }
@@ -104,7 +157,7 @@ export function loadBspLevel(
   const collision = new BspCollision(bsp);
   const spawn = findSpawn(bsp.entities);
 
-  const sampleBrightness = brightnessSampler(lightsFromEntities(bsp.entities));
+  const sampleLighting = lightingSampler(lightsFromEntities(bsp.entities));
 
   const { group, placed } = placeEntities(bsp.entities, vfs, palette, entityModels, {
     anisotropy: options.anisotropy,
@@ -127,7 +180,7 @@ export function loadBspLevel(
       world.setFlashlight(position, color, radius);
       for (const entity of placed) entity.model.setFlashlight(position, color, radius);
     },
-    sampleBrightness,
+    sampleLighting,
     update(time) {
       world.update(time);
       for (const entity of placed) entity.model.animate(time, entity.fps);
@@ -150,7 +203,7 @@ export function loadDemoLevel(options: WorldOptions): Level {
     spawnYaw: demo.spawnYaw,
     entities: [],
     setFlashlight: demo.setFlashlight,
-    sampleBrightness: demo.sampleBrightness,
+    sampleLighting: demo.sampleLighting,
     update: demo.update,
     dispose: demo.dispose,
     stats: demo.stats,

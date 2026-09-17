@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 
 /** Réglages de placement de l'arme, ajustables à chaud par le harnais. */
 export interface ViewmodelPose {
@@ -33,6 +32,10 @@ export interface ViewmodelState {
   underwater: boolean;
   /** Luminosité ambiante estimée à la position du joueur, entre 0 et 1. */
   brightness: number;
+  /** Direction de la lumière dominante, exprimée dans le repère de la vue. */
+  keyDirection: THREE.Vector3;
+  /** Teinte de cette lumière. */
+  keyColor: THREE.Color;
 }
 
 const MAX_SPEED = 320;
@@ -61,6 +64,15 @@ export class Viewmodel {
   private readonly lampLight: THREE.PointLight;
   private readonly muzzleLight: THREE.PointLight;
 
+  // Capture de ce qui entoure le joueur : sans elle, un métal pur réfléchit
+  // un décor qui n'existe pas et l'arme paraît venir d'une autre scène.
+  private readonly cubeTarget: THREE.WebGLCubeRenderTarget;
+  private readonly cubeCamera: THREE.CubeCamera;
+  private pmrem: THREE.PMREMGenerator | null = null;
+  private environmentTarget: THREE.WebGLRenderTarget | null = null;
+  private lastCapture = new THREE.Vector3(Infinity, Infinity, Infinity);
+  private captureAge = Infinity;
+
   private bobPhase = 0;
   private swayX = 0;
   private swayY = 0;
@@ -76,6 +88,10 @@ export class Viewmodel {
     this.scene.add(this.animated);
     this.anisotropy = anisotropy;
 
+    // Basse résolution : ces reflets servent l'ambiance, pas la lisibilité.
+    this.cubeTarget = new THREE.WebGLCubeRenderTarget(64, { type: THREE.HalfFloatType });
+    this.cubeCamera = new THREE.CubeCamera(4, 4000, this.cubeTarget);
+
     // Un métal sans environnement à réfléchir rend noir : la scène reçoit une
     // ambiance neutre, dont l'intensité suit ensuite l'éclairage du niveau.
     this.fillLight = new THREE.AmbientLight(0xffffff, 0.35);
@@ -90,13 +106,41 @@ export class Viewmodel {
 
   private anisotropy: number;
 
-  /** Génère l'environnement réfléchi par les parties métalliques. */
   prepareEnvironment(renderer: THREE.WebGLRenderer): void {
-    const pmrem = new THREE.PMREMGenerator(renderer);
-    const environment = pmrem.fromScene(new RoomEnvironment(), 0.04);
-    this.scene.environment = environment.texture;
-    this.scene.environmentIntensity = 0.5;
-    pmrem.dispose();
+    this.pmrem = new THREE.PMREMGenerator(renderer);
+    this.pmrem.compileCubemapShader();
+  }
+
+  /**
+   * Photographie le niveau autour du joueur et en fait l'environnement
+   * réfléchi par l'arme. C'est ce qui accorde le métal à la pièce : sa teinte
+   * et ses reflets viennent alors des vraies surfaces et des vraies lampes.
+   *
+   * L'opération n'a de sens que lorsque le décor visible a changé, elle est
+   * donc espacée dans le temps et dans l'espace.
+   */
+  captureEnvironment(
+    renderer: THREE.WebGLRenderer,
+    worldScene: THREE.Scene,
+    eye: THREE.Vector3,
+    deltaTime: number,
+    force = false,
+  ): boolean {
+    if (!this.pmrem) return false;
+    this.captureAge += deltaTime;
+    const moved = this.lastCapture.distanceTo(eye);
+    if (!force && moved < 64 && this.captureAge < 0.5) return false;
+
+    this.cubeCamera.position.copy(eye);
+    this.cubeCamera.update(renderer, worldScene);
+    this.environmentTarget = this.pmrem.fromCubemap(
+      this.cubeTarget.texture,
+      this.environmentTarget ?? undefined,
+    );
+    this.scene.environment = this.environmentTarget.texture;
+    this.lastCapture.copy(eye);
+    this.captureAge = 0;
+    return true;
   }
 
   get isReady(): boolean {
@@ -224,19 +268,27 @@ export class Viewmodel {
       this.swayX * 0.8 - this.lowerAmount * 0.12,
     );
 
-    // Éclairage accordé à la clarté du lieu, pour que l'arme ne brille pas
-    // dans un couloir noir ni ne disparaisse en pleine lumière.
+    // Éclairage accordé au lieu : la lumière vient de la direction où se
+    // trouvent réellement les sources, et en prend la teinte. Une lumière
+    // fixe tombant toujours d'en haut suffit à détacher l'arme du décor.
     const brightness = THREE.MathUtils.clamp(state.brightness, 0, 1);
-    this.fillLight.intensity = 0.14 + brightness * 0.5;
-    this.keyLight.intensity = 0.5 + brightness * 1.5;
-    this.lampLight.intensity = 1.35 - brightness * 0.75;
-    this.scene.environmentIntensity = 0.22 + brightness * 0.55;
+    this.keyLight.position.copy(state.keyDirection).multiplyScalar(3);
+    this.keyLight.color.copy(state.keyColor);
+    this.fillLight.color.copy(state.keyColor).lerp(new THREE.Color(0.7, 0.78, 1), 0.5);
+
+    this.fillLight.intensity = 0.2 + brightness * 0.55;
+    this.keyLight.intensity = 0.35 + brightness * 1.7;
+    this.lampLight.intensity = 0.9 - brightness * 0.6;
+    this.scene.environmentIntensity = 0.5 + brightness * 0.9;
 
     this.muzzleFlash = Math.max(0, this.muzzleFlash - deltaTime * 9);
     this.muzzleLight.intensity = this.muzzleFlash * 26;
   }
 
   dispose(): void {
+    this.cubeTarget.dispose();
+    this.environmentTarget?.dispose();
+    this.pmrem?.dispose();
     this.scene.traverse((object) => {
       if (object instanceof THREE.Mesh) {
         object.geometry.dispose();

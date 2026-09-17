@@ -6,6 +6,7 @@ import { buildDetailTexture, buildTextureSet, type TextureSet } from '../render/
 import { quakeToThree, type WorldOptions } from '../render/world';
 import { BoxCollision, type CollisionBox } from './boxCollision';
 import type { CollisionWorld, Vec3 } from './collision';
+import { lightingSampler, type LightingSample } from './level';
 import { demoPalette, demoTexture } from './demoTextures';
 
 type Axis = '+x' | '-x' | '+y' | '-y' | '+z' | '-z';
@@ -36,6 +37,8 @@ interface DemoLight {
   radius: number;
   intensity: number;
   style: number;
+  /** Teinte émise, qui déteint sur ce que la salle éclaire. */
+  color: THREE.Color;
 }
 
 const ALL_FACES: Axis[] = ['+x', '-x', '+y', '-y', '+z', '-z'];
@@ -119,7 +122,13 @@ function arena(): { brushes: Brush[]; lights: DemoLight[]; spawn: Vec3; spawnYaw
     [384, 384],
   ]) {
     brushes.push({ min: [px - 48, py - 48, 0], max: [px + 48, py + 48, HEIGHT], texture: 'trim' });
-    lights.push({ position: [px, py, 300], radius: 560, intensity: 0.85, style: 1 });
+    lights.push({
+      position: [px, py, 300],
+      radius: 560,
+      intensity: 0.85,
+      style: 1,
+      color: new THREE.Color(1, 0.86, 0.66),
+    });
   }
 
   // Escalier le long du mur ouest, menant à la passerelle.
@@ -176,12 +185,27 @@ function arena(): { brushes: Brush[]; lights: DemoLight[]; spawn: Vec3; spawnYaw
       radius: 760,
       intensity: 1.15,
       style,
+      // Les panneaux sont franchement chauds : c'est eux qui donnent
+      // sa dominante à la salle, et donc aux reflets de l'arme.
+      color: new THREE.Color(1, 0.82, 0.55),
     });
   }
 
   // Lumière large au-dessus du bassin.
-  lights.push({ position: [0, 0, 380], radius: 900, intensity: 0.95, style: 0 });
-  lights.push({ position: [-380, 0, 300], radius: 520, intensity: 0.6, style: 0 });
+  lights.push({
+    position: [0, 0, 380],
+    radius: 900,
+    intensity: 0.95,
+    style: 0,
+    color: new THREE.Color(0.92, 0.95, 1),
+  });
+  lights.push({
+    position: [-380, 0, 300],
+    radius: 520,
+    intensity: 0.6,
+    style: 0,
+    color: new THREE.Color(1, 0.9, 0.75),
+  });
 
   return { brushes, lights, spawn: [0, -480, 40], spawnYaw: Math.PI / 2 };
 }
@@ -192,7 +216,7 @@ export interface DemoWorld {
   spawn: Vec3;
   spawnYaw: number;
   setFlashlight(position: THREE.Vector3, color: THREE.Color, radius: number): void;
-  sampleBrightness(position: Vec3): number;
+  sampleLighting(position: Vec3): LightingSample;
   update(time: number): void;
   dispose(): void;
   stats: { faces: number; draws: number; textures: number; lightmapPages: number };
@@ -211,6 +235,7 @@ export function buildDemoMap(options: WorldOptions): DemoWorld {
     contents: brush.contents ?? Contents.SOLID,
   }));
   const collision = new BoxCollision(collisionBoxes);
+  const sampleLighting = lightingSampler(lights);
 
   const faces: Face[] = [];
   const liquidFaces: Face[] = [];
@@ -369,20 +394,7 @@ export function buildDemoMap(options: WorldOptions): DemoWorld {
     collision,
     spawn,
     spawnYaw,
-    sampleBrightness(position: Vec3) {
-      let total = 0;
-      for (const light of lights) {
-        const distance = Math.hypot(
-          light.position[0] - position[0],
-          light.position[1] - position[1],
-          light.position[2] - position[2],
-        );
-        if (distance >= light.radius) continue;
-        total += light.intensity * Math.pow(1 - distance / light.radius, 1.5);
-        if (total >= 1) return 1;
-      }
-      return Math.min(1, total);
-    },
+    sampleLighting,
     setFlashlight(position, color, radius) {
       for (const material of materials) {
         const uniforms = material.uniforms;
