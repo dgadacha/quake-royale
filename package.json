@@ -1,0 +1,20 @@
+{
+  "name": "quake-hd",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5212 --strictPort",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 5212 --strictPort",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  },
+  "dependencies": {
+    "three": "^0.169.0",
+    "@types/three": "^0.169.0"
+  }
+}
