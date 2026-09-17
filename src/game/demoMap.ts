@@ -192,6 +192,7 @@ export interface DemoWorld {
   spawn: Vec3;
   spawnYaw: number;
   setFlashlight(position: THREE.Vector3, color: THREE.Color, radius: number): void;
+  sampleBrightness(position: Vec3): number;
   update(time: number): void;
   dispose(): void;
   stats: { faces: number; draws: number; textures: number; lightmapPages: number };
@@ -368,6 +369,20 @@ export function buildDemoMap(options: WorldOptions): DemoWorld {
     collision,
     spawn,
     spawnYaw,
+    sampleBrightness(position: Vec3) {
+      let total = 0;
+      for (const light of lights) {
+        const distance = Math.hypot(
+          light.position[0] - position[0],
+          light.position[1] - position[1],
+          light.position[2] - position[2],
+        );
+        if (distance >= light.radius) continue;
+        total += light.intensity * Math.pow(1 - distance / light.radius, 1.5);
+        if (total >= 1) return 1;
+      }
+      return Math.min(1, total);
+    },
     setFlashlight(position, color, radius) {
       for (const material of materials) {
         const uniforms = material.uniforms;

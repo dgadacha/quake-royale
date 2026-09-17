@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { Contents } from '../formats/bsp';
 import { createPostProcessing, type PostProcessing } from '../render/postfx';
+import { Viewmodel } from '../render/viewmodel';
+import shotgunUrl from '../../assets/shotgun.glb?url';
 import { defaultWorldOptions, type WorldOptions } from '../render/world';
 import { InputManager } from './input';
 import type { Level } from './level';
@@ -24,6 +26,7 @@ export class Session {
   readonly options: WorldOptions;
 
   private post: PostProcessing;
+  readonly viewmodel: Viewmodel;
   private player: Player | null = null;
   private level: Level | null = null;
   private clock = new THREE.Clock();
@@ -47,8 +50,23 @@ export class Session {
 
     this.camera = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 1, 8000);
     this.options = defaultWorldOptions(this.renderer.capabilities.getMaxAnisotropy());
-    this.post = createPostProcessing(this.renderer, this.scene, this.camera);
+
+    this.viewmodel = new Viewmodel(
+      window.innerWidth / window.innerHeight,
+      this.renderer.capabilities.getMaxAnisotropy(),
+    );
+    this.viewmodel.prepareEnvironment(this.renderer);
+    this.post = createPostProcessing(this.renderer, this.scene, this.camera, {
+      scene: this.viewmodel.scene,
+      camera: this.viewmodel.camera,
+    });
     this.input = new InputManager(canvas);
+
+    // L'arme est volumineuse : elle se charge en tâche de fond et apparaît
+    // dès qu'elle est prête, sans retarder l'entrée dans le niveau.
+    void this.viewmodel.load(shotgunUrl).catch((error: unknown) => {
+      console.warn(`[quake-hd] arme non chargée : ${(error as Error).message}`);
+    });
 
     window.addEventListener('resize', this.onResize);
   }
@@ -96,6 +114,7 @@ export class Session {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height);
     this.post.setSize(width, height);
+    this.viewmodel.setAspect(width / height);
   };
 
   private frame = () => {
@@ -122,6 +141,17 @@ export class Session {
             : new THREE.Color(0.45, 0.75, 1.1);
       this.post.setUnderwater(this.underwaterAmount, tint);
       this.post.setDamage(this.player.inLava ? 0.35 + Math.sin(this.elapsed * 12) * 0.1 : 0);
+
+      if (this.player.consumeAttack()) this.viewmodel.fire();
+      const [aimX, aimY] = this.player.aimDelta;
+      this.viewmodel.update(delta, {
+        speed: this.player.speed,
+        onGround: this.player.state.onGround,
+        mouseDeltaX: aimX,
+        mouseDeltaY: aimY,
+        underwater: this.player.underwater,
+        brightness: this.level.sampleBrightness(this.player.position),
+      });
     }
 
     this.post.render(delta);
@@ -148,6 +178,7 @@ export class Session {
     this.stop();
     window.removeEventListener('resize', this.onResize);
     this.input.dispose();
+    this.viewmodel.dispose();
     this.level?.dispose();
     this.post.dispose();
     this.renderer.dispose();

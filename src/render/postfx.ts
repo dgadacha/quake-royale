@@ -82,6 +82,11 @@ const finalShader = {
   `,
 };
 
+export interface ViewmodelLayer {
+  scene: THREE.Scene;
+  camera: THREE.Camera;
+}
+
 export interface PostProcessing {
   composer: EffectComposer;
   setSize(width: number, height: number): void;
@@ -96,6 +101,7 @@ export function createPostProcessing(
   renderer: THREE.WebGLRenderer,
   scene: THREE.Scene,
   camera: THREE.Camera,
+  viewmodel?: ViewmodelLayer,
 ): PostProcessing {
   const size = renderer.getSize(new THREE.Vector2());
   const target = new THREE.WebGLRenderTarget(size.x, size.y, {
@@ -106,6 +112,16 @@ export function createPostProcessing(
 
   const composer = new EffectComposer(renderer, target);
   composer.addPass(new RenderPass(scene, camera));
+
+  // L'arme tenue en main se dessine par-dessus, sur un tampon de profondeur
+  // remis à zéro : elle ne peut donc jamais être coupée par un mur proche.
+  // Elle passe avant le halo lumineux pour en bénéficier comme le décor.
+  if (viewmodel) {
+    const weaponPass = new RenderPass(viewmodel.scene, viewmodel.camera);
+    weaponPass.clear = false;
+    weaponPass.clearDepth = true;
+    composer.addPass(weaponPass);
+  }
 
   const bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.55, 0.7, 0.85);
   composer.addPass(bloom);

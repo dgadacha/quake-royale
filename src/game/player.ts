@@ -18,6 +18,10 @@ export class Player {
   private viewOffset = 0;
   private roll = 0;
   private lastGroundZ: number;
+  private attackHeld = false;
+  /** Vrai le temps d'une image, à l'appui sur le tir. */
+  private attackEdge = false;
+  private lastMouse: [number, number] = [0, 0];
 
   constructor(collision: CollisionWorld, spawn: Vec3, spawnYaw: number) {
     this.physics = new PlayerPhysics(collision);
@@ -48,6 +52,10 @@ export class Player {
     this.yaw -= snapshot.mouseDeltaX;
     this.pitch -= snapshot.mouseDeltaY;
     this.pitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, this.pitch));
+
+    this.attackEdge = snapshot.attack && !this.attackHeld;
+    this.attackHeld = snapshot.attack;
+    this.lastMouse = [snapshot.mouseDeltaX, snapshot.mouseDeltaY];
 
     this.advance(snapshot, deltaTime);
   }
@@ -134,6 +142,17 @@ export class Player {
       this.state.origin[2] + VIEW_HEIGHT,
     );
     return out.set(x, y, z);
+  }
+
+  /** Consomme l'appui sur le tir : il n'est signalé qu'une fois. */
+  consumeAttack(): boolean {
+    const pressed = this.attackEdge;
+    this.attackEdge = false;
+    return pressed;
+  }
+
+  get aimDelta(): [number, number] {
+    return this.lastMouse;
   }
 
   get fellFrom(): number {

@@ -99,6 +99,23 @@ export function installHarness(session: Session): void {
       return out;
     },
 
+    /** Lit ou ajuste le placement de l'arme sans recompiler. */
+    weapon(pose?: { position?: [number, number, number]; rotation?: [number, number, number]; scale?: number }) {
+      const viewmodel = session.viewmodel;
+      if (!pose) return { pret: viewmodel.isReady, ...viewmodel.getPose() };
+      return viewmodel.setPose(pose);
+    },
+
+    fire() {
+      session.viewmodel.fire();
+      return 'tir';
+    },
+
+    /** Décalage courant de l'arme, pour observer le recul et le balancement. */
+    weaponMotion() {
+      return session.viewmodel.getMotion();
+    },
+
     level() {
       const level = session.currentLevel;
       return level ? { name: level.name, ...level.stats } : null;
