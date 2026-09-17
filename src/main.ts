@@ -265,6 +265,18 @@ void (async () => {
   overlay.showLoading('Recherche des données locales');
   const manifest = await readManifest();
   remoteMaps = manifest.maps ?? [];
+  // Bibliothèque de matériaux haute définition : son absence est le cas normal,
+  // le jeu se rend alors entièrement avec les textures d'origine.
+  const hasLibrary = await session.hdMaterials.loadLibrary();
+  if (hasLibrary) {
+    await session.hdMaterials.prepare(session.hdMaterials.assignedTextures());
+    const stats = session.hdMaterials.stats;
+    console.info(
+      `[quake-hd] matériaux HD : ${stats.resolved} chargés sur ${stats.definitions} déclarés, ` +
+        `${stats.assignments} textures converties`,
+    );
+  }
+
   const mounted = await mountLocalPaks(manifest.paks ?? []);
   await mountManifestFiles(manifest.files ?? []);
   entityModels = await loadEntityMapping();

@@ -3,4 +3,6 @@ dist
 reference/
 public/data/*
 !public/data/README.md
+public/materials/*
+!public/materials/README.md
 .DS_Store

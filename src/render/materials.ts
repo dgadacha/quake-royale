@@ -8,6 +8,7 @@ import {
   worldVertexShader,
 } from './worldShader';
 import type { TextureSet } from './textures';
+import type { ResolvedMaterial } from '../hd/materials/MaterialCache';
 
 export interface SurfaceUniformSettings {
   lightScale: number;
@@ -28,15 +29,25 @@ export function createWorldMaterial(
   detail: THREE.Texture,
   fallbackTexture: THREE.Texture,
   settings: SurfaceUniformSettings,
+  hd: ResolvedMaterial | null = null,
 ): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     vertexShader: worldVertexShader,
     fragmentShader: worldFragmentShader,
     uniforms: {
-      uMap: { value: set.map },
+      uMap: { value: hd?.baseColor ?? set.map },
       uSurface: { value: set.surfaceMap },
-      uEmissive: { value: set.emissiveMap ?? fallbackTexture },
-      uHasEmissive: { value: set.emissiveMap ? 1 : 0 },
+      uHdNormal: { value: hd?.normal ?? fallbackTexture },
+      uHdRoughness: { value: hd?.roughness ?? fallbackTexture },
+      uHdAo: { value: hd?.ao ?? fallbackTexture },
+      uHasHdNormal: { value: hd?.normal ? 1 : 0 },
+      uHasHdRoughness: { value: hd?.roughness ? 1 : 0 },
+      uHasHdAo: { value: hd?.ao ? 1 : 0 },
+      uNormalScale: { value: hd?.normalScale ?? 1 },
+      uTextureScale: { value: hd?.textureScale ?? 1 },
+      uMetalness: { value: hd?.metalnessValue ?? 0 },
+      uEmissive: { value: hd?.emissive ?? set.emissiveMap ?? fallbackTexture },
+      uHasEmissive: { value: hd?.emissive || set.emissiveMap ? 1 : 0 },
       uLightmap: { value: lightmap },
       uStyleLut: { value: styleLut },
       uDetail: { value: detail },
@@ -50,7 +61,7 @@ export function createWorldMaterial(
       uNormalFlipY: { value: -1 },
       uFogColor: { value: settings.fogColor },
       uFogDensity: { value: settings.fogDensity },
-      uEmissiveStrength: { value: settings.emissiveStrength },
+      uEmissiveStrength: { value: hd?.emissiveIntensity ?? settings.emissiveStrength },
       uTime: { value: 0 },
       uWarpAmount: { value: 0 },
       uFlashPos: { value: new THREE.Vector3() },

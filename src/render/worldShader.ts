@@ -41,6 +41,15 @@ precision highp float;
 
 uniform sampler2D uMap;
 uniform sampler2D uSurface;
+uniform sampler2D uHdNormal;
+uniform sampler2D uHdRoughness;
+uniform sampler2D uHdAo;
+uniform float uHasHdNormal;
+uniform float uHasHdRoughness;
+uniform float uHasHdAo;
+uniform float uNormalScale;
+uniform float uTextureScale;
+uniform float uMetalness;
 uniform sampler2D uEmissive;
 uniform sampler2D uLightmap;
 uniform sampler2D uStyleLut;
@@ -87,13 +96,30 @@ vec3 sampleLight(vec2 uv) {
 }
 
 void main() {
-  vec4 albedo = texture2D(uMap, vUv);
+  // Un matériau haute définition peut répéter autrement que la texture
+  // d'origine : son échelle lui est propre.
+  vec2 hdUv = vUv * uTextureScale;
+
+  vec4 albedo = texture2D(uMap, uTextureScale == 1.0 ? vUv : hdUv);
   if (albedo.a < 0.5) discard;
 
   vec4 surface = texture2D(uSurface, vUv);
-  vec3 tangentNormal = surface.xyz * 2.0 - 1.0;
+
+  // Les cartes fournies remplacent celles déduites de la texture d'origine ;
+  // ce qui manque retombe sur ces dernières.
+  vec3 tangentNormal;
+  if (uHasHdNormal > 0.5) {
+    tangentNormal = texture2D(uHdNormal, hdUv).xyz * 2.0 - 1.0;
+    tangentNormal.xy *= uNormalScale;
+  } else {
+    tangentNormal = surface.xyz * 2.0 - 1.0;
+  }
   tangentNormal.y *= uNormalFlipY;
-  float roughness = surface.a;
+
+  float roughness = uHasHdRoughness > 0.5
+    ? texture2D(uHdRoughness, hdUv).g
+    : surface.a;
+  float materialAo = uHasHdAo > 0.5 ? texture2D(uHdAo, hdUv).r : 1.0;
 
   // Grain de proximité : il disparaît avec la distance grâce au mip.
   vec3 detail = texture2D(uDetail, vUv * uDetailScale).xyz;
@@ -123,8 +149,15 @@ void main() {
   float spec = pow(max(dot(normal, halfDir), 0.0), gloss) * (1.0 - roughness) * uSpecular;
   float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), 5.0) * 0.28;
 
-  vec3 color = diffuse + light * (spec + fresnel * (1.0 - roughness));
-  color += albedo.rgb * uAmbient;
+  // Le métal réfléchit sa propre couleur au lieu de diffuser du blanc.
+  vec3 specularTint = mix(vec3(1.0), albedo.rgb, uMetalness);
+  vec3 color = diffuse * (1.0 - uMetalness * 0.65)
+    + light * specularTint * (spec + fresnel * (1.0 - roughness));
+
+  // L'occlusion du matériau ne touche que l'éclairage d'ambiance : elle
+  // décrit le relief de la surface, pas l'ombre portée du niveau.
+  color += albedo.rgb * uAmbient * materialAo;
+  color *= mix(1.0, materialAo, 0.6);
 
   if (uHasEmissive > 0.5) {
     vec3 emissive = texture2D(uEmissive, vUv).rgb;

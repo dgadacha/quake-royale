@@ -14,6 +14,7 @@ import {
   createWorldMaterial,
   type LiquidKind,
 } from './materials';
+import type { HDMaterialManager } from '../hd/materials/HDMaterialManager';
 
 /** Quake place Z vers le haut : on bascule dans le repère de three. */
 export function quakeToThree(x: number, y: number, z: number): [number, number, number] {
@@ -31,6 +32,8 @@ export interface WorldOptions {
   emissiveStrength: number;
   detailStrength: number;
   atlasSize: number;
+  /** Couche haute définition, consultée surface par surface. Absente, rien ne change. */
+  hdMaterials?: HDMaterialManager | null;
 }
 
 export const defaultWorldOptions = (anisotropy: number): WorldOptions => ({
@@ -44,6 +47,7 @@ export const defaultWorldOptions = (anisotropy: number): WorldOptions => ({
   emissiveStrength: 1.6,
   detailStrength: 0.35,
   atlasSize: 2048,
+  hdMaterials: null,
 });
 
 interface FaceGeometry {
@@ -189,7 +193,14 @@ export interface BuiltWorld {
   setFlashlight(position: THREE.Vector3, color: THREE.Color, radius: number): void;
   update(time: number): void;
   dispose(): void;
-  stats: { faces: number; draws: number; textures: number; lightmapPages: number };
+  stats: {
+    faces: number;
+    draws: number;
+    textures: number;
+    lightmapPages: number;
+    /** Lots de surfaces rendus avec un matériau haute définition. */
+    hdMaterials: number;
+  };
 }
 
 export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions): BuiltWorld {
@@ -227,6 +238,7 @@ export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions
   const allMaterials: THREE.ShaderMaterial[] = [];
   const animatedMaterials: { material: THREE.ShaderMaterial; frames: number[] }[] = [];
   let faceCount = 0;
+  let hdApplied = 0;
 
   const emptyTexture = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
   emptyTexture.needsUpdate = true;
@@ -366,6 +378,10 @@ export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions
         material = createLiquidMaterial(getTextureSet(bucket.texture).map, kindName, options);
       } else {
         const set = getTextureSet(bucket.texture);
+        // Conversion haute définition si la texture en a une, sinon la
+        // texture d'origine continue de faire le travail.
+        const hd = options.hdMaterials?.resolve(name) ?? null;
+        if (hd) hdApplied++;
         material = createWorldMaterial(
           set,
           emptyTexture,
@@ -373,6 +389,7 @@ export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions
           detail,
           emptyTexture,
           options,
+          hd,
         );
         material.userData.lightmapPage = bucket.page;
 
@@ -456,6 +473,7 @@ export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions
       draws: allMaterials.length,
       textures: textureSets.size,
       lightmapPages: lightmapPages.length,
+      hdMaterials: hdApplied,
     },
   };
 }

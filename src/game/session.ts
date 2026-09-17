@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Contents } from '../formats/bsp';
 import { createPostProcessing, type PostProcessing } from '../render/postfx';
 import { loadGraphics, saveGraphics, type GraphicsSettings } from '../render/graphics';
+import { HDMaterialManager } from '../hd/materials/HDMaterialManager';
 import { Viewmodel } from '../render/viewmodel';
 import shotgunUrl from '../../assets/shotgun.glb?url';
 import { defaultWorldOptions, quakeToThree, type WorldOptions } from '../render/world';
@@ -29,6 +30,7 @@ export class Session {
   private post: PostProcessing;
   private graphics: GraphicsSettings = loadGraphics();
   readonly viewmodel: Viewmodel;
+  readonly hdMaterials: HDMaterialManager;
   private player: Player | null = null;
   private level: Level | null = null;
   private clock = new THREE.Clock();
@@ -61,6 +63,8 @@ export class Session {
 
     this.camera = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 1, 8000);
     this.options = defaultWorldOptions(this.renderer.capabilities.getMaxAnisotropy());
+    this.hdMaterials = new HDMaterialManager(this.renderer.capabilities.getMaxAnisotropy());
+    this.options.hdMaterials = this.hdMaterials;
 
     this.viewmodel = new Viewmodel(
       window.innerWidth / window.innerHeight,
@@ -243,6 +247,7 @@ export class Session {
     window.removeEventListener('resize', this.onResize);
     this.input.dispose();
     this.viewmodel.dispose();
+    this.hdMaterials.dispose();
     this.level?.dispose();
     this.post.dispose();
     this.renderer.dispose();
