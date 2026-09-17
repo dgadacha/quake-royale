@@ -285,10 +285,22 @@ async function startLevel(factory: () => Level | Promise<Level>, label: string):
       'Cliquez pour prendre le contrôle<br /><span style="opacity:.6">Échap pour revenir au menu</span>',
     );
 
+    if (level.stats.paletteMissing) {
+      // Sans palette, les index de texture ne donnent pas les bonnes couleurs.
+      // Mieux vaut le dire que laisser croire à un défaut du rendu.
+      overlay.setHint(
+        'Palette absente : les couleurs des textures ne sont pas les bonnes.<br />' +
+          '<span style="opacity:.7">Montez le pak0.pak de votre copie du jeu pour les rétablir.</span>',
+      );
+      setTimeout(() => overlay.setHint(''), 9000);
+    }
+
     const elapsed = Math.round(performance.now() - started);
     console.info(
       `[quake-hd] ${level.name} : ${level.stats.faces} faces, ${level.stats.draws} lots, ` +
-        `${level.stats.textures} textures, ${level.stats.lightmapPages} page(s) de lightmap, ${elapsed} ms`,
+        `${level.stats.textures} textures, ${level.stats.lightmapPages} page(s) de lightmap, ` +
+        `${level.stats.hiddenFaces ?? 0} faces de service écartées, ${elapsed} ms` +
+        (level.stats.paletteMissing ? ' — palette absente, couleurs approximatives' : ''),
     );
   } catch (error) {
     console.error(error);

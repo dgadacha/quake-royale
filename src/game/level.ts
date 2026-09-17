@@ -34,7 +34,17 @@ export interface Level {
   isVisible(from: Vec3, to: Vec3): boolean;
   update(time: number): void;
   dispose(): void;
-  stats: { faces: number; draws: number; textures: number; lightmapPages: number; entities?: number };
+  stats: {
+    faces: number;
+    draws: number;
+    textures: number;
+    lightmapPages: number;
+    entities?: number;
+    /** Faces écartées du rendu : volumes de déclenchement et de service. */
+    hiddenFaces?: number;
+    /** Vrai quand aucune palette n'est montée : les teintes sont inventées. */
+    paletteMissing?: boolean;
+  };
 }
 
 function parseVector(value: string | undefined): Vec3 | null {
@@ -164,8 +174,11 @@ export function loadBspLevel(
   const data = vfs.readOrThrow(path);
   const bsp = parseBsp(data);
 
+  // Sans palette, les index des textures ne peuvent pas être convertis en
+  // couleurs justes : le rendu reste lisible mais les teintes sont inventées.
   const paletteData = vfs.read('gfx/palette.lmp');
   const palette = paletteData ? new Palette(paletteData) : Palette.fallback();
+  const paletteMissing = !paletteData;
 
   const world = buildWorld(bsp, palette, options);
   const collision = new BspCollision(bsp);
@@ -214,7 +227,7 @@ export function loadBspLevel(
       for (const entity of placed) entity.model.dispose();
       world.dispose();
     },
-    stats: { ...world.stats, entities: placed.length },
+    stats: { ...world.stats, entities: placed.length, paletteMissing },
   };
 }
 

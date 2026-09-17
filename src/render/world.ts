@@ -218,7 +218,35 @@ export interface BuiltWorld {
     lightmapPages: number;
     /** Lots de surfaces rendus avec un matériau haute définition. */
     hdMaterials: number;
+    /** Faces écartées du rendu : volumes de déclenchement et de service. */
+    hiddenFaces: number;
   };
+}
+
+/**
+ * Textures qui ne se dessinent pas : elles marquent des volumes de service.
+ */
+const INVISIBLE_TEXTURES = new Set(['trigger', 'clip', 'skip', 'hint', 'hintskip']);
+
+/**
+ * Sous-modèles à ne pas afficher.
+ *
+ * Une carte range dans ses sous-modèles aussi bien les portes et les
+ * plateformes que les volumes de déclenchement, qui détectent le passage du
+ * joueur et n'ont jamais été destinés à être vus. Les dessiner revient à
+ * poser de grandes cloisons opaques au milieu des salles.
+ */
+function hiddenModels(entities: BspData['entities']): Set<number> {
+  const hidden = new Set<number>();
+  for (const entity of entities) {
+    const model = /^\*(\d+)$/.exec(entity.model ?? '');
+    if (!model) continue;
+    const classname = entity.classname ?? '';
+    if (classname.startsWith('trigger') || classname === 'func_illusionary_invisible') {
+      hidden.add(Number.parseInt(model[1], 10));
+    }
+  }
+  return hidden;
 }
 
 export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions): BuiltWorld {
@@ -272,9 +300,21 @@ export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions
   const emptyTexture = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
   emptyTexture.needsUpdate = true;
 
-  for (const model of bsp.models) {
+  const hidden = hiddenModels(bsp.entities);
+  let hiddenFaces = 0;
+
+  for (const [modelIndex, model] of bsp.models.entries()) {
     const group = new THREE.Group();
     const buckets = new Map<string, Bucket>();
+
+    // Le groupe reste dans la liste pour que les indices correspondent aux
+    // sous-modèles de la carte, mais on ne lui construit aucune surface.
+    if (hidden.has(modelIndex)) {
+      hiddenFaces += model.faceCount;
+      models.push(group);
+      root.add(group);
+      continue;
+    }
 
     for (let f = 0; f < model.faceCount; f++) {
       const face = bsp.faces[model.firstFace + f];
@@ -282,6 +322,11 @@ export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions
       const info = bsp.texInfos[face.texInfo];
       if (!info) continue;
       const mip = bsp.textures[info.miptex];
+      // Les volumes de service portent une texture qui ne se dessine pas.
+      if (INVISIBLE_TEXTURES.has((mip?.name ?? '').toLowerCase())) {
+        hiddenFaces++;
+        continue;
+      }
       const kindName = classifyTexture(mip?.name ?? '');
       const kind: Kind = kindName === 'sky' ? 'sky' : kindName === 'normal' ? 'solid' : 'liquid';
       faceCount++;
@@ -323,7 +368,9 @@ export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions
             }
           }
         }
-        const slot = atlas.add(lightWidth, lightHeight, samples, hasLighting ? 0 : 110);
+        // Une face sans éclairage calculé reste sombre. Une valeur claire en
+        // ferait des taches blanches au milieu d'une carte par ailleurs cuite.
+        const slot = atlas.add(lightWidth, lightHeight, samples, hasLighting ? 0 : 18);
         slotX = slot.x;
         slotY = slot.y;
         page = slot.page;
@@ -581,6 +628,7 @@ export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions
       textures: textureSets.size,
       lightmapPages: lightmapPages.length,
       hdMaterials: hdApplied,
+      hiddenFaces,
     },
   };
 }

@@ -5,6 +5,8 @@ reference/
 
 # Données du jeu : elles restent sur votre machine.
 # tools/fetch-maps.mjs et tools/scan-maps.mjs les installent en local.
+# Le manifeste décrit une installation locale : il est réécrit par les outils.
+public/data/manifest.json
 public/data/maps/*.bsp
 public/data/*.pak
 public/data/**/*.pak
