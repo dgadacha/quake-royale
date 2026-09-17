@@ -10,16 +10,18 @@ export interface ViewmodelPose {
 }
 
 /**
- * Pose calée à l'écran. L'arme doit être tenue, pas posée dans le vide : elle
- * est donc assez proche et assez grande pour que la crosse sorte du cadre en
- * bas à droite, le canon fuyant vers le centre. La rotation autour de l'axe
- * vertical retourne le modèle, dont le canon pointe vers l'arrière dans son
- * repère d'origine.
+ * Pose calée à l'écran, fidèle au jeu d'origine : l'arme est centrée et
+ * strictement dans l'axe du regard, sans décalage ni inclinaison, vue de
+ * derrière en fort raccourci. Les jeux de tir modernes la décalent à droite,
+ * ce qui ne correspond pas à ce que l'on veut retrouver ici.
+ *
+ * La rotation autour de l'axe vertical retourne le modèle, dont le canon
+ * pointe vers l'arrière dans son repère d'origine.
  */
 export const defaultPose: ViewmodelPose = {
-  position: [0.235, -0.185, -0.27],
-  rotation: [-0.03, -Math.PI / 2 + 0.22, 0.07],
-  scale: 0.58,
+  position: [0, -0.225, -0.235],
+  rotation: [0, -Math.PI / 2, 0],
+  scale: 0.72,
 };
 
 export interface ViewmodelState {
@@ -182,17 +184,19 @@ export class Viewmodel {
   update(deltaTime: number, state: ViewmodelState): void {
     if (!this.model) return;
 
-    // Balancement de marche : un mouvement en huit, d'amplitude liée à l'allure.
+    // Balancement de marche. L'arme étant centrée, le mouvement est surtout
+    // vertical : un débattement latéral marqué trahirait tout de suite
+    // l'écart avec le jeu d'origine, où l'arme est rigidement liée à la vue.
     const moving = state.onGround && state.speed > 20;
     const ratio = Math.min(1, state.speed / MAX_SPEED);
     this.bobPhase += deltaTime * (moving ? 5.5 + ratio * 5.5 : 1.6);
-    const bobAmount = moving ? ratio * 0.022 : 0.004;
-    const bobX = Math.sin(this.bobPhase) * bobAmount;
-    const bobY = -Math.abs(Math.cos(this.bobPhase)) * bobAmount * 0.75;
+    const bobAmount = moving ? ratio * 0.026 : 0.004;
+    const bobX = Math.sin(this.bobPhase) * bobAmount * 0.3;
+    const bobY = -Math.abs(Math.cos(this.bobPhase)) * bobAmount;
 
-    // Traîne : l'arme suit la visée avec un temps de retard.
-    const swayTargetX = THREE.MathUtils.clamp(-state.mouseDeltaX * 2.2, -0.05, 0.05);
-    const swayTargetY = THREE.MathUtils.clamp(state.mouseDeltaY * 2.2, -0.05, 0.05);
+    // Traîne légère sur la visée : juste de quoi donner du poids à l'arme.
+    const swayTargetX = THREE.MathUtils.clamp(-state.mouseDeltaX * 0.9, -0.022, 0.022);
+    const swayTargetY = THREE.MathUtils.clamp(state.mouseDeltaY * 0.9, -0.022, 0.022);
     this.swayX = THREE.MathUtils.damp(this.swayX, swayTargetX, 7, deltaTime);
     this.swayY = THREE.MathUtils.damp(this.swayY, swayTargetY, 7, deltaTime);
 
@@ -216,8 +220,8 @@ export class Viewmodel {
     );
     this.animated.rotation.set(
       -this.recoil * 0.22 + this.lowerAmount * 0.22,
-      this.swayX * 1.4,
-      this.swayX * 2.2 - this.lowerAmount * 0.12,
+      this.swayX * 0.7,
+      this.swayX * 0.8 - this.lowerAmount * 0.12,
     );
 
     // Éclairage accordé à la clarté du lieu, pour que l'arme ne brille pas
