@@ -2,6 +2,7 @@ import { PakArchive, VirtualFileSystem } from './formats/pak';
 import { loadBspLevel, loadDemoLevel, type Level } from './game/level';
 import { Session } from './game/session';
 import { Overlay, type GraphicsRow } from './ui/overlay';
+import { applyPreset, type QualityPreset } from './render/graphics';
 import { installHarness } from './dev/harness';
 import { loadEntityMapping, type EntityModelMap } from './game/entityModels';
 
@@ -95,6 +96,26 @@ function refreshMenu(note?: string): void {
 function showGraphicsPanel(note?: string): void {
   const settings = session.graphicsSettings;
   const rows: GraphicsRow[] = [
+    {
+      key: 'preset',
+      label: 'Qualité',
+      hint: 'Règle en une fois tout ce qui pèse sur les performances.',
+      kind: 'choice',
+      value: settings.preset,
+      choices: [
+        { value: 'low', label: 'Bas' },
+        { value: 'medium', label: 'Moyen' },
+        { value: 'high', label: 'Élevé' },
+        { value: 'ultra', label: 'Maximal' },
+      ],
+    },
+    {
+      key: 'shadows',
+      label: 'Ombres portées',
+      hint: 'Projetées par les objets mobiles. Celles du décor sont déjà cuites.',
+      kind: 'toggle',
+      value: settings.shadows,
+    },
     {
       key: 'ambientOcclusion',
       label: 'Occlusion ambiante',
@@ -194,7 +215,16 @@ function showGraphicsPanel(note?: string): void {
 
   overlay.showGraphics(
     rows,
-    (key, value) => session.setGraphics({ [key]: value }),
+    (key, value) => {
+      if (key === 'preset') {
+        // Un préréglage écrase tous les réglages : le panneau est redessiné.
+        session.setGraphics(applyPreset(value as Exclude<QualityPreset, 'custom'>));
+        showGraphicsPanel(note);
+        return;
+      }
+      // Toute retouche fait sortir du préréglage.
+      session.setGraphics({ [key]: value, preset: 'custom' });
+    },
     () => refreshMenu(note),
   );
 }

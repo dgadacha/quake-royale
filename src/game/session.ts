@@ -4,6 +4,7 @@ import { createPostProcessing, type PostProcessing } from '../render/postfx';
 import { loadGraphics, saveGraphics, type GraphicsSettings } from '../render/graphics';
 import { HDMaterialManager } from '../hd/materials/HDMaterialManager';
 import { HDLightManager } from '../hd/lights/HDLightManager';
+import { ShadowMapper } from '../render/shadows';
 import { Viewmodel } from '../render/viewmodel';
 import shotgunUrl from '../../assets/shotgun.glb?url';
 import { defaultWorldOptions, quakeToThree, type WorldOptions } from '../render/world';
@@ -33,6 +34,7 @@ export class Session {
   readonly viewmodel: Viewmodel;
   readonly hdMaterials: HDMaterialManager;
   readonly hdLights = new HDLightManager();
+  readonly shadows = new ShadowMapper();
   private player: Player | null = null;
   private level: Level | null = null;
   private clock = new THREE.Clock();
@@ -46,6 +48,8 @@ export class Session {
   private readonly muzzleColor = new THREE.Color(1.5, 1.1, 0.62);
   // Objets réutilisés à chaque image, pour ne rien allouer dans la boucle.
   private readonly keyDirection = new THREE.Vector3();
+  /** Même direction, gardée dans le repère du monde pour les ombres. */
+  private readonly keyDirectionWorld = new THREE.Vector3(0, 1, 0);
   private readonly keyColor = new THREE.Color();
   private readonly viewRotation = new THREE.Quaternion();
   private readonly eyePosition = new THREE.Vector3();
@@ -83,6 +87,8 @@ export class Session {
     });
     this.input = new InputManager(canvas);
     this.post.setGraphics(this.graphics);
+    this.shadows.setResolution(this.graphics.shadowResolution);
+    this.shadows.setEnabled(this.graphics.shadows);
 
     // L'arme est volumineuse : elle se charge en tâche de fond et apparaît
     // dès qu'elle est prête, sans retarder l'entrée dans le niveau.
@@ -192,6 +198,32 @@ export class Session {
         this.hdLights.specularAmount,
       );
 
+      // Ombres portées des objets mobiles, cadrées autour du joueur et
+      // orientées par la source dominante du lieu.
+      if (this.shadows.isEnabled) {
+        this.shadows.update(
+          this.renderer,
+          this.scene,
+          this.player.eyeWorldPosition(this.eyePosition),
+          this.keyDirectionWorld,
+        );
+        this.level.setShadow(
+          this.shadows.texture,
+          this.shadows.matrix,
+          this.shadows.viewMatrix,
+          0.75,
+          this.shadows.texel,
+        );
+      } else {
+        this.level.setShadow(
+          this.shadows.texture,
+          this.shadows.matrix,
+          this.shadows.viewMatrix,
+          0,
+          this.shadows.texel,
+        );
+      }
+
       // Lampe portée : le halo suit la tête, jamais la direction de visée
       // pour ne pas écraser le modelé des lightmaps. Le temps d'un coup de
       // feu, elle se renforce et se réchauffe : le décor doit s'éclairer
@@ -226,6 +258,7 @@ export class Session {
         lighting.direction[1],
         lighting.direction[2],
       );
+      this.keyDirectionWorld.set(kx, ky, kz);
       this.viewRotation.copy(this.camera.quaternion).invert();
       this.keyDirection.set(kx, ky, kz).applyQuaternion(this.viewRotation);
       this.keyColor.copy(lighting.color);
@@ -276,6 +309,7 @@ export class Session {
     window.removeEventListener('resize', this.onResize);
     this.input.dispose();
     this.viewmodel.dispose();
+    this.shadows.dispose();
     this.hdMaterials.dispose();
     this.level?.dispose();
     this.post.dispose();

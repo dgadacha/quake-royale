@@ -9,11 +9,13 @@ export interface GraphicsRow {
   key: string;
   label: string;
   hint?: string;
-  kind: 'toggle' | 'range';
-  value: boolean | number;
+  kind: 'toggle' | 'range' | 'choice';
+  value: boolean | number | string;
   min?: number;
   max?: number;
   step?: number;
+  /** Options d'un réglage à choix, par exemple les préréglages de qualité. */
+  choices?: { value: string; label: string }[];
 }
 
 /** Écrans d'accueil, de chargement et affichage de jeu. */
@@ -141,7 +143,7 @@ export class Overlay {
   /** Panneau de réglages d'image, appliqués immédiatement. */
   showGraphics(
     rows: GraphicsRow[],
-    onChange: (key: string, value: boolean | number) => void,
+    onChange: (key: string, value: boolean | number | string) => void,
     onBack: () => void,
   ): void {
     const screen = this.newScreen();
@@ -167,7 +169,22 @@ export class Overlay {
       const control = document.createElement('div');
       control.className = 'control';
 
-      if (row.kind === 'toggle') {
+      if (row.kind === 'choice') {
+        for (const choice of row.choices ?? []) {
+          const button = document.createElement('button');
+          button.className = 'toggle';
+          button.textContent = choice.label;
+          button.dataset.on = String(row.value === choice.value);
+          button.addEventListener('click', () => {
+            for (const sibling of control.querySelectorAll('button')) {
+              sibling.dataset.on = 'false';
+            }
+            button.dataset.on = 'true';
+            onChange(row.key, choice.value as never);
+          });
+          control.append(button);
+        }
+      } else if (row.kind === 'toggle') {
         const button = document.createElement('button');
         button.className = 'toggle';
         const paint = (on: boolean) => {

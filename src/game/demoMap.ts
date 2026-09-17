@@ -218,6 +218,13 @@ export interface DemoWorld {
   spawnYaw: number;
   setFlashlight(position: THREE.Vector3, color: THREE.Color, radius: number): void;
   setDynamicLights(count: number, diffuse: number, specular: number): void;
+  setShadow(
+    map: THREE.Texture,
+    matrix: THREE.Matrix4,
+    view: THREE.Matrix4,
+    strength: number,
+    texel: number,
+  ): void;
   styleIntensity(style: number): number;
   /** Sources de la salle, converties pour l'éclairage dynamique. */
   hdLights: HDLight[];
@@ -412,6 +419,23 @@ export function buildDemoMap(options: WorldOptions): DemoWorld {
       style: light.style,
       classname: 'light',
     })),
+    setShadow(
+      map: THREE.Texture,
+      matrix: THREE.Matrix4,
+      view: THREE.Matrix4,
+      strength: number,
+      texel: number,
+    ) {
+      for (const material of materials) {
+        const uniforms = material.uniforms;
+        if (!uniforms.uShadowStrength) continue;
+        uniforms.uShadowMap.value = map;
+        (uniforms.uShadowMatrix.value as THREE.Matrix4).copy(matrix);
+        (uniforms.uShadowView.value as THREE.Matrix4).copy(view);
+        uniforms.uShadowStrength.value = strength;
+        uniforms.uShadowTexel.value = texel;
+      }
+    },
     setDynamicLights(count: number, diffuse: number, specular: number) {
       for (const material of materials) {
         const uniforms = material.uniforms;

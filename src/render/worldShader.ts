@@ -72,6 +72,12 @@ uniform vec3 uFlashPos;
 uniform vec3 uFlashColor;
 uniform float uFlashRadius;
 
+uniform sampler2D uShadowMap;
+uniform mat4 uShadowMatrix;
+uniform mat4 uShadowView;
+uniform float uShadowStrength;
+uniform float uShadowTexel;
+
 #define MAX_LIGHTS 12
 uniform vec4 uLightPositions[MAX_LIGHTS];
 uniform vec4 uLightColors[MAX_LIGHTS];
@@ -172,6 +178,41 @@ void main() {
     color += emissive * uEmissiveStrength * pulse;
   }
 
+  // Ombre portée des objets mobiles.
+  //
+  // Les ombres du décor sont déjà dans la lightmap ; celle-ci n'ajoute que ce
+  // qu'un éclairage cuit ne peut pas connaître, à savoir ce qui bouge.
+  float shadow = 1.0;
+  if (uShadowStrength > 0.0) {
+    vec4 shadowPosition = uShadowMatrix * vec4(vWorldPos, 1.0);
+    vec3 shadowCoord = shadowPosition.xyz / shadowPosition.w;
+    vec2 shadowUv = shadowCoord.xy * 0.5 + 0.5;
+
+    if (shadowUv.x > 0.0 && shadowUv.x < 1.0 && shadowUv.y > 0.0 && shadowUv.y < 1.0) {
+      // Profondeur du fragment mesurée depuis la source, dans la même unité
+      // que celle écrite dans la carte d'ombre. La projection étant
+      // orthographique, la composante homogène ne la porte pas.
+      float fragmentDepth = -(uShadowView * vec4(vWorldPos, 1.0)).z;
+
+      float occluded = 0.0;
+      // Neuf échantillons : une ombre à un seul échantillon crénelle.
+      for (int x = -1; x <= 1; x++) {
+        for (int y = -1; y <= 1; y++) {
+          vec2 offset = vec2(float(x), float(y)) * uShadowTexel;
+          float casterDepth = texture2D(uShadowMap, shadowUv + offset).r;
+          // Une valeur nulle signale un texel qu'aucun projeteur n'a touché.
+          occluded += (casterDepth > 0.0 && casterDepth < fragmentDepth - 6.0) ? 1.0 : 0.0;
+        }
+      }
+      shadow = 1.0 - (occluded / 9.0) * uShadowStrength;
+    }
+  }
+
+  // L'éclairage cuit ignore les objets mobiles : sans cette part, un objet
+  // posé ne marquerait pas le sol sous lui. Elle reste partielle, la lumière
+  // indirecte contournant largement un obstacle de cette taille.
+  color *= mix(1.0, shadow, 0.55);
+
   // Sources dynamiques du niveau.
   //
   // Les lightmaps portent déjà le diffus de ces mêmes sources : en réappliquer
@@ -191,11 +232,11 @@ void main() {
     vec3 energy = uLightColors[i].rgb * uLightColors[i].a * attenuation;
 
     float lambert = max(dot(normal, lightVector), 0.0);
-    color += albedo.rgb * energy * lambert * uDynamicDiffuse;
+    color += albedo.rgb * energy * lambert * uDynamicDiffuse * shadow;
 
     vec3 lightHalf = normalize(lightVector + viewDir);
     float lightSpec = pow(max(dot(normal, lightHalf), 0.0), gloss) * (1.0 - roughness);
-    color += energy * lightSpec * uDynamicSpecular;
+    color += energy * lightSpec * uDynamicSpecular * shadow;
   }
 
   // Lampe attachée au joueur : évite les couloirs totalement noirs.

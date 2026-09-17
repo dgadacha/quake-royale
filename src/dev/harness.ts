@@ -129,6 +129,11 @@ export function installHarness(session: Session): void {
       return session.viewmodel.getMotion();
     },
 
+    /** Contenu de la carte d'ombre, pour vérifier que des projeteurs y entrent. */
+    shadowMap() {
+      return session.shadows.inspect(session.renderer);
+    },
+
     /** Sources dynamiques retenues autour du joueur. */
     lights() {
       return {

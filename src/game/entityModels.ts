@@ -5,6 +5,7 @@ import type { VirtualFileSystem } from '../formats/pak';
 import type { Palette } from '../formats/palette';
 import { AliasModel, type AliasModelOptions } from '../render/aliasModel';
 import { quakeToThree } from '../render/world';
+import { SHADOW_CASTER_LAYER } from '../render/shadows';
 
 /**
  * Correspondance entre le nom d'une entité et le fichier de modèle à afficher.
@@ -73,6 +74,8 @@ export function placeEntities(
     const angle = Number.parseFloat(entity.angle ?? '0');
     if (!Number.isNaN(angle)) model.mesh.rotation.y = angle * (Math.PI / 180);
 
+    // Visible par la caméra du monde comme par celle des ombres.
+    model.mesh.layers.enable(SHADOW_CASTER_LAYER);
     group.add(model.mesh);
     placed.push({ classname: entity.classname, model, fps: 6 });
   }

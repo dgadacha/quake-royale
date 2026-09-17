@@ -1,3 +1,5 @@
+export type QualityPreset = 'low' | 'medium' | 'high' | 'ultra' | 'custom';
+
 /** Réglages d'image, modifiables en jeu et conservés d'une session à l'autre. */
 export interface GraphicsSettings {
   ambientOcclusion: boolean;
@@ -16,6 +18,10 @@ export interface GraphicsSettings {
   /** Dosages de l'apport dynamique, par-dessus l'éclairage cuit. */
   lightDiffuse: number;
   lightSpecular: number;
+  shadows: boolean;
+  shadowResolution: number;
+  /** Préréglage dont les valeurs sont issues, ou 'custom' après un ajustement. */
+  preset: QualityPreset;
 }
 
 export const defaultGraphics = (): GraphicsSettings => ({
@@ -36,7 +42,93 @@ export const defaultGraphics = (): GraphicsSettings => ({
   // Les lightmaps portent déjà le diffus : une pleine dose délaverait tout.
   lightDiffuse: 0.32,
   lightSpecular: 1.0,
+  shadows: true,
+  shadowResolution: 1024,
+  preset: 'high',
 });
+
+/**
+ * Quatre marches de qualité. Chacune pèse sur ce qui coûte réellement :
+ * le nombre de sources calculées, la résolution des effets d'écran et les
+ * ombres, dans cet ordre d'importance.
+ */
+export const qualityPresets: Record<
+  Exclude<QualityPreset, 'custom'>,
+  Omit<GraphicsSettings, 'preset'>
+> = {
+  low: {
+    ambientOcclusion: false,
+    aoIntensity: 1,
+    aoRadius: 32,
+    reflections: false,
+    reflectionStrength: 0,
+    bloom: true,
+    bloomStrength: 0.4,
+    grain: false,
+    effectScale: 0.5,
+    dynamicLights: true,
+    maxLights: 3,
+    lightDiffuse: 0.32,
+    lightSpecular: 0.8,
+    shadows: false,
+    shadowResolution: 512,
+  },
+  medium: {
+    ambientOcclusion: true,
+    aoIntensity: 1,
+    aoRadius: 34,
+    reflections: false,
+    reflectionStrength: 0,
+    bloom: true,
+    bloomStrength: 0.5,
+    grain: true,
+    effectScale: 0.5,
+    dynamicLights: true,
+    maxLights: 5,
+    lightDiffuse: 0.32,
+    lightSpecular: 1,
+    shadows: true,
+    shadowResolution: 1024,
+  },
+  high: {
+    ambientOcclusion: true,
+    aoIntensity: 1.15,
+    aoRadius: 38,
+    reflections: true,
+    reflectionStrength: 0.35,
+    bloom: true,
+    bloomStrength: 0.55,
+    grain: true,
+    effectScale: 0.5,
+    dynamicLights: true,
+    maxLights: 8,
+    lightDiffuse: 0.32,
+    lightSpecular: 1,
+    shadows: true,
+    shadowResolution: 1024,
+  },
+  ultra: {
+    ambientOcclusion: true,
+    aoIntensity: 1.25,
+    aoRadius: 44,
+    reflections: true,
+    reflectionStrength: 0.45,
+    bloom: true,
+    bloomStrength: 0.55,
+    grain: true,
+    effectScale: 1,
+    dynamicLights: true,
+    maxLights: 12,
+    lightDiffuse: 0.35,
+    lightSpecular: 1.15,
+    shadows: true,
+    shadowResolution: 2048,
+  },
+};
+
+export function applyPreset(preset: Exclude<QualityPreset, 'custom'>): GraphicsSettings {
+  return { ...qualityPresets[preset], preset };
+}
 
 const STORAGE_KEY = 'quake-hd.graphics';
 

@@ -22,6 +22,13 @@ export interface Level {
   /** Sources dynamiques de la carte. */
   hdLights: HDLight[];
   setDynamicLights(count: number, diffuse: number, specular: number): void;
+  setShadow(
+    map: THREE.Texture,
+    matrix: THREE.Matrix4,
+    view: THREE.Matrix4,
+    strength: number,
+    texel: number,
+  ): void;
   styleIntensity(style: number): number;
   /** Deux points se voient-ils, sans mur entre eux ? */
   isVisible(from: Vec3, to: Vec3): boolean;
@@ -189,13 +196,15 @@ export function loadBspLevel(
       for (const entity of placed) entity.model.setFlashlight(position, color, radius);
     },
     sampleLighting,
-    hdLights: resolveLights(bsp.entities),
+    // Entités d'éclairage et surfaces émettrices alimentent la même liste.
+    hdLights: [...resolveLights(bsp.entities), ...world.surfaceLights],
     isVisible: (from, to) => {
       // Gabarit ponctuel : on suit un rayon de lumière, pas un joueur.
       const trace = pointTrace.trace(from, to);
       return trace.fraction >= 0.999;
     },
     setDynamicLights: world.setDynamicLights,
+    setShadow: world.setShadow,
     styleIntensity: world.styleIntensity,
     update(time) {
       world.update(time);
@@ -223,6 +232,7 @@ export function loadDemoLevel(options: WorldOptions): Level {
     hdLights: demo.hdLights,
     isVisible: demo.isVisible,
     setDynamicLights: demo.setDynamicLights,
+    setShadow: demo.setShadow,
     styleIntensity: demo.styleIntensity,
     update: demo.update,
     dispose: demo.dispose,

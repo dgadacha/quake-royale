@@ -16,6 +16,7 @@ import {
 } from './materials';
 import type { HDMaterialManager } from '../hd/materials/HDMaterialManager';
 import { MAX_ACTIVE_LIGHTS } from '../hd/lights/HDLightManager';
+import { lightFromSurface, type HDLight } from '../hd/lights/LightResolver';
 
 /** Quake place Z vers le haut : on bascule dans le repère de three. */
 export function quakeToThree(x: number, y: number, z: number): [number, number, number] {
@@ -196,8 +197,17 @@ export interface BuiltWorld {
   root: THREE.Group;
   /** Un groupe par modèle du BSP, l'indice 0 étant la géométrie fixe. */
   models: THREE.Group[];
+  /** Sources déduites des surfaces émettrices de la carte. */
+  surfaceLights: HDLight[];
   setFlashlight(position: THREE.Vector3, color: THREE.Color, radius: number): void;
   setDynamicLights(count: number, diffuse: number, specular: number): void;
+  setShadow(
+    map: THREE.Texture,
+    matrix: THREE.Matrix4,
+    view: THREE.Matrix4,
+    strength: number,
+    texel: number,
+  ): void;
   styleIntensity(style: number): number;
   update(time: number): void;
   dispose(): void;
@@ -247,6 +257,17 @@ export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions
   const animatedMaterials: { material: THREE.ShaderMaterial; frames: number[] }[] = [];
   let faceCount = 0;
   let hdApplied = 0;
+
+  /**
+   * Sources déduites des surfaces qui émettent : un bassin de lave doit
+   * éclairer sa salle. Elles sont regroupées par cellule d'espace, sinon une
+   * grande nappe produirait des centaines de sources pour un seul reflet.
+   */
+  const emitterCells = new Map<
+    string,
+    { kind: 'lava' | 'slime' | 'teleport'; x: number; y: number; z: number; weight: number }
+  >();
+  const EMITTER_CELL = 320;
 
   const emptyTexture = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
   emptyTexture.needsUpdate = true;
@@ -306,6 +327,40 @@ export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions
         slotX = slot.x;
         slotY = slot.y;
         page = slot.page;
+      }
+
+      // Centre de la face, utile aux surfaces émettrices.
+      if (kind === 'liquid') {
+        const liquidKind = classifyTexture(mip?.name ?? '');
+        if (liquidKind === 'lava' || liquidKind === 'slime' || liquidKind === 'teleport') {
+          let cx = 0;
+          let cy = 0;
+          let cz = 0;
+          for (let i = 0; i < face.edgeCount; i++) {
+            const edgeIndex = bsp.surfEdges[face.firstEdge + i];
+            const vertexIndex =
+              edgeIndex >= 0 ? bsp.edges[edgeIndex * 2] : bsp.edges[-edgeIndex * 2 + 1];
+            cx += bsp.vertices[vertexIndex * 3];
+            cy += bsp.vertices[vertexIndex * 3 + 1];
+            cz += bsp.vertices[vertexIndex * 3 + 2];
+          }
+          cx /= face.edgeCount;
+          cy /= face.edgeCount;
+          cz /= face.edgeCount;
+
+          const cellKey = `${liquidKind}:${Math.round(cx / EMITTER_CELL)}:${Math.round(
+            cy / EMITTER_CELL,
+          )}:${Math.round(cz / EMITTER_CELL)}`;
+          const cell = emitterCells.get(cellKey);
+          if (cell) {
+            cell.x += cx;
+            cell.y += cy;
+            cell.z += cz;
+            cell.weight += 1;
+          } else {
+            emitterCells.set(cellKey, { kind: liquidKind, x: cx, y: cy, z: cz, weight: 1 });
+          }
+        }
       }
 
       const key = `${kind}:${info.miptex}:${page}`;
@@ -436,6 +491,36 @@ export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions
     }
   };
 
+  // Une source par cellule, placée un peu au-dessus de la nappe pour
+  // éclairer ses bords plutôt que de rester noyée dedans.
+  const surfaceLights: HDLight[] = [...emitterCells.values()].map((cell) => {
+    const center: [number, number, number] = [
+      cell.x / cell.weight,
+      cell.y / cell.weight,
+      cell.z / cell.weight + 24,
+    ];
+    const radius = Math.min(900, 300 + Math.sqrt(cell.weight) * 150);
+    return lightFromSurface(center, cell.kind, radius);
+  });
+
+  const setShadow = (
+    map: THREE.Texture,
+    matrix: THREE.Matrix4,
+    view: THREE.Matrix4,
+    strength: number,
+    texel: number,
+  ) => {
+    for (const material of allMaterials) {
+      const uniforms = material.uniforms;
+      if (!uniforms.uShadowStrength) continue;
+      uniforms.uShadowMap.value = map;
+      (uniforms.uShadowMatrix.value as THREE.Matrix4).copy(matrix);
+      (uniforms.uShadowView.value as THREE.Matrix4).copy(view);
+      uniforms.uShadowStrength.value = strength;
+      uniforms.uShadowTexel.value = texel;
+    }
+  };
+
   const setDynamicLights = (count: number, diffuse: number, specular: number) => {
     for (const material of allMaterials) {
       const uniforms = material.uniforms;
@@ -483,8 +568,10 @@ export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions
   return {
     root,
     models,
+    surfaceLights,
     setFlashlight,
     setDynamicLights,
+    setShadow,
     styleIntensity: (style: number) => styles.intensityOf(style),
     update,
     dispose,
