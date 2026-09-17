@@ -5,6 +5,8 @@ export interface HitResult {
   enemy: Enemy | null;
   /** Point d'impact, sur une créature ou sur le décor. */
   point: Vec3;
+  /** Normale de la surface touchée ; vers le tireur si c'est une créature. */
+  normal: Vec3;
   distance: number;
   killed: boolean;
 }
@@ -83,6 +85,11 @@ export function fireRay(
     origin[2] + direction[2] * closestDistance,
   ];
 
+  // Une créature n'a pas de plan : l'éclat rejaillit vers le tireur.
+  const normal: Vec3 = closest
+    ? [-direction[0], -direction[1], -direction[2]]
+    : worldTrace.planeNormal;
+
   const killed = closest ? onDamage(closest, damage) : false;
-  return { enemy: closest, point, distance: closestDistance, killed };
+  return { enemy: closest, point, normal, distance: closestDistance, killed };
 }

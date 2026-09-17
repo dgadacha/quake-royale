@@ -134,6 +134,11 @@ export function installHarness(session: Session): void {
       return session.shadows.inspect(session.renderer);
     },
 
+    /** Marques et éclats actuellement en vie. */
+    effects() {
+      return session.currentLevel?.effectsInfo() ?? null;
+    },
+
     /** Adversaires : position, état, santé. */
     enemies() {
       return session.currentLevel?.enemyStates() ?? [];

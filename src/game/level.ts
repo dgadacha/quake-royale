@@ -8,6 +8,9 @@ import { buildDemoMap } from './demoMap';
 import { placeEntities, type EntityModelMap } from './entityModels';
 import { resolveLights, type HDLight } from '../hd/lights/LightResolver';
 import { buildFaceLeafIndex, VisibilitySet } from '../render/pvs';
+import { DecalPool } from '../render/decals';
+import { ImpactParticles } from '../render/impactParticles';
+import { surfaceAt } from './entities/SurfaceProbe';
 import { collectEnemies } from './entities/Enemy';
 import { EnemyManager } from './entities/EnemyManager';
 import { EnemyRenderer } from '../render/enemyRenderer';
@@ -49,6 +52,8 @@ export interface Level {
   /** Tir instantané depuis un point ; renvoie le point d'impact. */
   fire(origin: Vec3, direction: Vec3, damage: number): { point: Vec3; hit: boolean; killed: boolean };
   enemyInfo(): { total: number; alive: number; awake: number };
+  /** Marques et éclats actuellement à l'écran. */
+  effectsInfo(): { decals: number; particles: number };
   /** Détail des adversaires, pour la mise au point. */
   enemyStates(): { kind: string; state: string; health: number; origin: Vec3 }[];
   /** Restreint le dessin à ce qui est visible depuis un point. */
@@ -238,6 +243,10 @@ export function loadBspLevel(
   );
   const enemyRenderer = new EnemyRenderer(enemies);
 
+  // Traces laissées par les tirs et éclats projetés à l'impact.
+  const decals = new DecalPool();
+  const particles = new ImpactParticles();
+
   const movers = collectMovers(bsp);
   const moverManager = new MoverManager(movers);
   const playerCollision = movers.length
@@ -254,6 +263,8 @@ export function loadBspLevel(
   });
   world.root.add(group);
   world.root.add(enemyRenderer.root);
+  world.root.add(decals.mesh);
+  world.root.add(particles.points);
 
   return {
     name: path,
@@ -280,6 +291,8 @@ export function loadBspLevel(
       }
     },
     updateEnemies(deltaTime, playerPosition) {
+      decals.update(deltaTime);
+      particles.update(deltaTime);
       if (enemies.length === 0) return 0;
       enemyManager.update(deltaTime, playerPosition);
       enemyRenderer.update();
@@ -297,6 +310,24 @@ export function loadBspLevel(
         damage,
         (enemy, amount) => enemyManager.damage(enemy, amount),
       );
+
+      const point = new THREE.Vector3(
+        ...quakeToThree(result.point[0], result.point[1], result.point[2]),
+      );
+      const normal = new THREE.Vector3(
+        ...quakeToThree(result.normal[0], result.normal[1], result.normal[2]),
+      ).normalize();
+
+      if (result.enemy) {
+        // Une créature ne garde pas de marque : seuls les éclats la signalent.
+        particles.burst(point, normal, 'flesh');
+      } else {
+        const surface = surfaceAt(bsp, visibility, result.point, result.normal);
+        // Un liquide avale la marque, il n'en reste que la gerbe.
+        if (surface !== 'liquid') decals.add(point, normal, 5.5);
+        particles.burst(point, normal, surface);
+      }
+
       return { point: result.point, hit: result.enemy !== null, killed: result.killed };
     },
     enemyStates: () =>
@@ -369,6 +400,8 @@ export function loadBspLevel(
     },
     dispose() {
       for (const entity of placed) entity.model.dispose();
+      decals.dispose();
+      particles.dispose();
       enemyRenderer.dispose();
       world.dispose();
     },
@@ -379,6 +412,7 @@ export function loadBspLevel(
       movers: movers.length,
       enemies: enemies.length,
     },
+    effectsInfo: () => ({ decals: decals.activeCount, particles: particles.activeCount }),
   };
 }
 
@@ -412,6 +446,7 @@ export function loadDemoLevel(options: WorldOptions): Level {
     }),
     enemyInfo: () => ({ total: 0, alive: 0, awake: 0 }),
     enemyStates: () => [],
+    effectsInfo: () => ({ decals: 0, particles: 0 }),
     updateVisibility: () => {
       // L'arène de démonstration est construite par le code : elle n'a pas
       // d'arbre de visibilité, tout y est dessiné.
