@@ -310,8 +310,13 @@ async function startLevel(factory: () => Level | Promise<Level>, label: string):
 
 session.setStatsListener((stats) => {
   if (!statsVisible) return;
+  const health = stats.health > 0 ? `<b>${stats.health}</b> pv` : '<b>abattu</b>';
+  const enemies = stats.enemiesAlive > 0
+    ? ` · ${stats.enemiesAlive} adversaires` + (stats.enemiesAwake > 0 ? ` (${stats.enemiesAwake} en alerte)` : '')
+    : '';
   overlay.setStats(
-    `<b>${stats.fps.toFixed(0)}</b> fps · <b>${stats.speed.toFixed(0)}</b> u/s<br />` +
+    `${health}${enemies}<br />` +
+      `<b>${stats.fps.toFixed(0)}</b> fps · <b>${stats.speed.toFixed(0)}</b> u/s<br />` +
       `x ${stats.position[0].toFixed(0)} y ${stats.position[1].toFixed(0)} z ${stats.position[2].toFixed(0)}<br />` +
       `${stats.draws} appels · ${stats.faces} faces · ${stats.textures} textures`,
   );

@@ -19,6 +19,9 @@ export interface SessionStats {
   draws: number;
   faces: number;
   textures: number;
+  health: number;
+  enemiesAlive: number;
+  enemiesAwake: number;
 }
 
 /** Boucle de jeu : entrée, physique, rendu et effets d'ambiance. */
@@ -44,6 +47,8 @@ export class Session {
   private flashColor = new THREE.Color(0.55, 0.48, 0.38);
   /** Reste de l'éclair de bouche, qui éclaire aussi le décor. */
   private muzzleGlow = 0;
+  /** Compte à rebours avant réapparition. */
+  private deathTimer = 0;
   private readonly lampColor = new THREE.Color();
   private readonly muzzleColor = new THREE.Color(1.5, 1.1, 0.62);
   // Objets réutilisés à chaque image, pour ne rien allouer dans la boucle.
@@ -189,6 +194,16 @@ export class Session {
       this.level.updateEntities(delta, this.player.position);
       this.level.updateVisibility(this.player.position);
 
+      const damage = this.level.updateEnemies(delta, this.player.position);
+      if (damage > 0 && this.player.health > 0) {
+        const died = this.player.hurt(damage);
+        if (died) this.deathTimer = 2.2;
+      }
+      if (this.deathTimer > 0) {
+        this.deathTimer -= delta;
+        if (this.deathTimer <= 0) this.player.respawn();
+      }
+
       // Sources dynamiques : la sélection suit le joueur, les intensités
       // suivent les mêmes styles d'animation que les lightmaps.
       this.hdLights.update(this.player.position, delta, (style) =>
@@ -244,11 +259,18 @@ export class Session {
             ? new THREE.Color(0.6, 1.2, 0.5)
             : new THREE.Color(0.45, 0.75, 1.1);
       this.post.setUnderwater(this.underwaterAmount, tint);
-      this.post.setDamage(this.player.inLava ? 0.35 + Math.sin(this.elapsed * 12) * 0.1 : 0);
+      // Rouge à l'écran : dégâts encaissés, bain de lave, ou mort en cours.
+      const hurtFlash = Math.max(0, 0.55 - this.player.sinceHurt * 1.6);
+      const lava = this.player.inLava ? 0.35 + Math.sin(this.elapsed * 12) * 0.1 : 0;
+      const dying = this.deathTimer > 0 ? 0.7 : 0;
+      this.post.setDamage(Math.max(hurtFlash, lava, dying));
 
-      if (this.player.consumeAttack()) {
+      if (this.player.consumeAttack() && this.player.health > 0) {
         this.viewmodel.fire();
         this.muzzleGlow = 1;
+        // Le tir part de l'oeil et suit la visée, pas le canon : c'est ce que
+        // le joueur vise qui doit être touché.
+        this.level.fire(this.player.eyeOrigin, this.player.aimDirection, 24);
       }
 
       // La lumière dominante du niveau est ramenée dans le repère de la vue :
@@ -296,6 +318,7 @@ export class Session {
     if (!this.onStats || !this.player || !this.level) return;
 
     const average = this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length;
+    const enemies = this.level.enemyInfo();
     this.onStats({
       fps: average > 0 ? 1 / average : 0,
       speed: this.player.speed,
@@ -303,6 +326,9 @@ export class Session {
       draws: this.renderer.info.render.calls,
       faces: this.level.stats.faces,
       textures: this.level.stats.textures,
+      health: this.player.health,
+      enemiesAlive: enemies.alive,
+      enemiesAwake: enemies.awake,
     });
   }
 

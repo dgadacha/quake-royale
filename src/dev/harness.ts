@@ -134,6 +134,24 @@ export function installHarness(session: Session): void {
       return session.shadows.inspect(session.renderer);
     },
 
+    /** Adversaires : position, état, santé. */
+    enemies() {
+      return session.currentLevel?.enemyStates() ?? [];
+    },
+
+    /** Tire dans la direction de visée et renvoie le résultat. */
+    shoot(damage = 24) {
+      const level = session.currentLevel;
+      const player = session.playerRef;
+      if (!level || !player) return null;
+      return level.fire(player.eyeOrigin, player.aimDirection, damage);
+    },
+
+    /** Santé du joueur. */
+    health() {
+      return session.playerRef?.health ?? 0;
+    },
+
     /** Visibilité : feuille courante et faces réellement dessinées. */
     visibility(enabled?: boolean) {
       const level = session.currentLevel;

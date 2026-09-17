@@ -8,6 +8,10 @@ import { buildDemoMap } from './demoMap';
 import { placeEntities, type EntityModelMap } from './entityModels';
 import { resolveLights, type HDLight } from '../hd/lights/LightResolver';
 import { buildFaceLeafIndex, VisibilitySet } from '../render/pvs';
+import { collectEnemies } from './entities/Enemy';
+import { EnemyManager } from './entities/EnemyManager';
+import { EnemyRenderer } from '../render/enemyRenderer';
+import { fireRay } from './entities/Combat';
 import { collectMovers } from './entities/BrushEntity';
 import { MoverManager } from './entities/MoverManager';
 import { MoverCollision } from './entities/MoverCollision';
@@ -40,6 +44,13 @@ export interface Level {
   updateEntities(deltaTime: number, playerPosition: Vec3): void;
   /** État des volumes mobiles, pour la mise au point. */
   moverStates(): { kind: string; state: string; progress: number; center: Vec3 }[];
+  /** Fait vivre les adversaires ; renvoie les dégâts infligés au joueur. */
+  updateEnemies(deltaTime: number, playerPosition: Vec3): number;
+  /** Tir instantané depuis un point ; renvoie le point d'impact. */
+  fire(origin: Vec3, direction: Vec3, damage: number): { point: Vec3; hit: boolean; killed: boolean };
+  enemyInfo(): { total: number; alive: number; awake: number };
+  /** Détail des adversaires, pour la mise au point. */
+  enemyStates(): { kind: string; state: string; health: number; origin: Vec3 }[];
   /** Restreint le dessin à ce qui est visible depuis un point. */
   updateVisibility(playerPosition: Vec3): void;
   visibilityInfo(): { leaf: number; drawn: number; total: number; enabled: boolean };
@@ -58,6 +69,7 @@ export interface Level {
     paletteMissing?: boolean;
     /** Portes, plateformes et boutons animés. */
     movers?: number;
+    enemies?: number;
   };
 }
 
@@ -212,6 +224,20 @@ export function loadBspLevel(
   let visibilityEnabled = visibility.hasData;
   void faceLeafs;
 
+  // Adversaires : la carte donne leur nom et leur position, le comportement
+  // vient du jeu.
+  const enemies = collectEnemies(bsp);
+  let pendingDamage = 0;
+  const enemyManager = new EnemyManager(
+    enemies,
+    {
+      collision: collision.world(0),
+      isVisible: (from, to) => collision.world(0, HULL_POINT).trace(from, to).fraction >= 0.999,
+    },
+    { onPlayerHit: (damage) => { pendingDamage += damage; } },
+  );
+  const enemyRenderer = new EnemyRenderer(enemies);
+
   const movers = collectMovers(bsp);
   const moverManager = new MoverManager(movers);
   const playerCollision = movers.length
@@ -227,6 +253,7 @@ export function loadBspLevel(
     emissiveStrength: options.emissiveStrength,
   });
   world.root.add(group);
+  world.root.add(enemyRenderer.root);
 
   return {
     name: path,
@@ -252,6 +279,38 @@ export function loadBspLevel(
         group.position.set(x, y, z);
       }
     },
+    updateEnemies(deltaTime, playerPosition) {
+      if (enemies.length === 0) return 0;
+      enemyManager.update(deltaTime, playerPosition);
+      enemyRenderer.update();
+      const damage = pendingDamage;
+      pendingDamage = 0;
+      return damage;
+    },
+    fire(origin, direction, damage) {
+      const result = fireRay(
+        playerCollision,
+        enemies,
+        origin,
+        direction,
+        4000,
+        damage,
+        (enemy, amount) => enemyManager.damage(enemy, amount),
+      );
+      return { point: result.point, hit: result.enemy !== null, killed: result.killed };
+    },
+    enemyStates: () =>
+      enemies.map((enemy) => ({
+        kind: enemy.profile.id,
+        state: enemy.state,
+        health: enemy.health,
+        origin: [...enemy.origin] as Vec3,
+      })),
+    enemyInfo: () => ({
+      total: enemies.length,
+      alive: enemyManager.aliveCount,
+      awake: enemyManager.awakeCount,
+    }),
     updateVisibility(playerPosition) {
       if (!visibilityEnabled) return;
 
@@ -310,6 +369,7 @@ export function loadBspLevel(
     },
     dispose() {
       for (const entity of placed) entity.model.dispose();
+      enemyRenderer.dispose();
       world.dispose();
     },
     stats: {
@@ -317,6 +377,7 @@ export function loadBspLevel(
       entities: placed.length,
       paletteMissing,
       movers: movers.length,
+      enemies: enemies.length,
     },
   };
 }
@@ -339,6 +400,18 @@ export function loadDemoLevel(options: WorldOptions): Level {
     updateEntities: () => {
       // L'arène de démonstration n'a pas de volume mobile.
     },
+    updateEnemies: () => 0,
+    fire: (origin, direction) => ({
+      point: [
+        origin[0] + direction[0] * 2000,
+        origin[1] + direction[1] * 2000,
+        origin[2] + direction[2] * 2000,
+      ] as Vec3,
+      hit: false,
+      killed: false,
+    }),
+    enemyInfo: () => ({ total: 0, alive: 0, awake: 0 }),
+    enemyStates: () => [],
     updateVisibility: () => {
       // L'arène de démonstration est construite par le code : elle n'a pas
       // d'arbre de visibilité, tout y est dessiné.

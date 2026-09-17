@@ -22,12 +22,19 @@ export class Player {
   /** Vrai le temps d'une image, à l'appui sur le tir. */
   private attackEdge = false;
   private lastMouse: [number, number] = [0, 0];
+  health = 100;
+  /** Temps depuis le dernier coup reçu, pour le retour visuel. */
+  sinceHurt = Infinity;
+  private readonly spawnOrigin: Vec3;
+  private readonly spawnYaw: number;
 
   constructor(collision: CollisionWorld, spawn: Vec3, spawnYaw: number) {
     this.physics = new PlayerPhysics(collision);
     this.state = createMoveState(spawn);
     this.yaw = spawnYaw;
     this.lastGroundZ = spawn[2];
+    this.spawnOrigin = [...spawn] as Vec3;
+    this.spawnYaw = spawnYaw;
   }
 
   get position(): Vec3 {
@@ -110,6 +117,7 @@ export class Player {
       this.state.velocity[0] * right[0] + this.state.velocity[1] * right[1];
     const targetRoll = THREE.MathUtils.clamp(-sideSpeed / MoveConfig.maxSpeed, -1, 1) * 0.035;
     this.roll = THREE.MathUtils.damp(this.roll, targetRoll, 8, deltaTime);
+    this.sinceHurt += deltaTime;
   }
 
   /** Place et oriente la caméra à partir de l'état courant. */
@@ -142,6 +150,38 @@ export class Player {
       this.state.origin[2] + VIEW_HEIGHT,
     );
     return out.set(x, y, z);
+  }
+
+  /** Encaisse un coup ; renvoie vrai si le joueur vient de tomber. */
+  hurt(amount: number): boolean {
+    if (this.health <= 0) return false;
+    this.health -= amount;
+    this.sinceHurt = 0;
+    if (this.health <= 0) {
+      this.health = 0;
+      return true;
+    }
+    return false;
+  }
+
+  /** Remet le joueur au point de départ, en pleine santé. */
+  respawn(): void {
+    this.state.origin = [...this.spawnOrigin] as Vec3;
+    this.state.velocity = [0, 0, 0];
+    this.yaw = this.spawnYaw;
+    this.pitch = 0;
+    this.health = 100;
+    this.sinceHurt = Infinity;
+  }
+
+  /** Direction de visée, dans le repère du jeu. */
+  get aimDirection(): Vec3 {
+    const [forward] = directions(this.yaw, this.pitch);
+    return forward;
+  }
+
+  get eyeOrigin(): Vec3 {
+    return [this.state.origin[0], this.state.origin[1], this.state.origin[2] + VIEW_HEIGHT];
   }
 
   /** Consomme l'appui sur le tir : il n'est signalé qu'une fois. */
