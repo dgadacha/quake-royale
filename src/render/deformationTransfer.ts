@@ -132,9 +132,59 @@ function closestPointOnTriangle(
   out[0] = 1 - v - w; out[1] = v; out[2] = w;
 }
 
+/**
+ * Découpage du modèle en pièces indépendantes.
+ *
+ * Les modèles du jeu séparent souvent l'arme du corps qui la tient : ce sont
+ * deux surfaces qui ne partagent aucun sommet. Un point détaillé du fusil est
+ * alors géométriquement aussi proche de la main que du fusil lui-même, et
+ * s'accrocherait à la mauvaise pièce.
+ */
+export function modelParts(model: MdlModel): Int32Array {
+  const parent = new Int32Array(model.vertexCount);
+  for (let i = 0; i < parent.length; i++) parent[i] = i;
+
+  const root = (a: number): number => {
+    while (parent[a] !== a) {
+      parent[a] = parent[parent[a]];
+      a = parent[a];
+    }
+    return a;
+  };
+  const join = (a: number, b: number) => {
+    const ra = root(a);
+    const rb = root(b);
+    if (ra !== rb) parent[ra] = rb;
+  };
+
+  for (const triangle of model.triangles) {
+    join(triangle.vertices[0], triangle.vertices[1]);
+    join(triangle.vertices[1], triangle.vertices[2]);
+  }
+
+  // Une pièce par triangle, numérotée à partir de zéro.
+  const labels = new Map<number, number>();
+  const parts = new Int32Array(model.triangles.length);
+  for (let t = 0; t < model.triangles.length; t++) {
+    const r = root(model.triangles[t].vertices[0]);
+    let label = labels.get(r);
+    if (label === undefined) {
+      label = labels.size;
+      labels.set(r, label);
+    }
+    parts[t] = label;
+  }
+  return parts;
+}
+
 export interface BindOptions {
   /** Triangles de référence par sommet ; au-delà de un, les jointures se lissent. */
   neighbours?: number;
+  /**
+   * Restreint chaque sommet à la pièce dont il est le plus proche.
+   * Sans quoi un point du fusil s'accroche à la main qui le tient.
+   */
+  respectParts?: boolean;
 }
 
 /**
@@ -150,6 +200,7 @@ export function bindToModel(
   const rest = frameToRenderSpace(model, 0);
   const triangles = model.triangles;
   const vertexCount = positions.length / 3;
+  const parts = options.respectParts === false ? null : modelParts(model);
 
   const binding: SurfaceBinding = {
     vertexCount,
@@ -174,7 +225,28 @@ export function bindToModel(
     bestDistance.fill(Infinity);
     bestTriangle.fill(-1);
 
+    // Première passe : de quelle pièce ce sommet relève-t-il ? La seconde ne
+    // cherchera plus qu'à l'intérieur de celle-là.
+    let part = -1;
+    if (parts) {
+      let nearestDistance = Infinity;
+      for (let t = 0; t < triangles.length; t++) {
+        const [i0, i1, i2] = triangles[t].vertices;
+        const a = i0 * 3, b = i1 * 3, c = i2 * 3;
+        closestPointOnTriangle(px, py, pz, rest, a, b, c, bary);
+        const qx = bary[0] * rest[a] + bary[1] * rest[b] + bary[2] * rest[c];
+        const qy = bary[0] * rest[a + 1] + bary[1] * rest[b + 1] + bary[2] * rest[c + 1];
+        const qz = bary[0] * rest[a + 2] + bary[1] * rest[b + 2] + bary[2] * rest[c + 2];
+        const d = (px - qx) ** 2 + (py - qy) ** 2 + (pz - qz) ** 2;
+        if (d < nearestDistance) {
+          nearestDistance = d;
+          part = parts[t];
+        }
+      }
+    }
+
     for (let t = 0; t < triangles.length; t++) {
+      if (parts && parts[t] !== part) continue;
       const [i0, i1, i2] = triangles[t].vertices;
       const a = i0 * 3, b = i1 * 3, c = i2 * 3;
       closestPointOnTriangle(px, py, pz, rest, a, b, c, bary);
@@ -236,7 +308,14 @@ export function bindToModel(
       binding.bary[base * 3 + 1] = b1;
       binding.bary[base * 3 + 2] = b2;
 
+      // Un triangle sans repère ne sait pas porter l'écart du sommet : il le
+      // ramènerait à plat sur la surface. Mieux vaut l'écarter.
       const oriented = triangleBasis(rest, a, b, c, basis);
+      if (!oriented && k > 0) {
+        binding.triangle[base] = -1;
+        binding.weight[base] = 0;
+        continue;
+      }
       if (k > 0 && oriented && hasReference) {
         const facing = basis[3] * reference[3] + basis[4] * reference[4] + basis[5] * reference[5];
         if (facing < 0) {
