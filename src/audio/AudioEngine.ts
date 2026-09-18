@@ -33,7 +33,13 @@ export class AudioEngine {
   private readonly buffers = new Map<string, AudioBuffer | null>();
   private readonly pending = new Map<string, Promise<AudioBuffer | null>>();
   private volume = 0.8;
-  private enabled = true;
+  /**
+   * Le paramètre « mute » de l'adresse coupe la sortie dès le démarrage.
+   * Il sert aux essais : le jeu se lance sans réveiller toute la pièce.
+   */
+  private enabled = !new URLSearchParams(
+    typeof location === 'undefined' ? '' : location.search,
+  ).has('mute');
 
   constructor(private readonly vfs: VirtualFileSystem) {}
 

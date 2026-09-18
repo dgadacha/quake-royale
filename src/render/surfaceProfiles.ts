@@ -191,7 +191,20 @@ const familyPrefixes: [MaterialFamily, string[]][] = [
   ],
   [
     'bareMetal',
-    ['grate', 'grill', 'vent', 'pipe', 'duct', 'girder', 'chain', 'cable', 'rust', 'lgmetal'],
+    [
+      'grate',
+      'grill',
+      'grill2',
+      'fence',
+      'vent',
+      'pipe',
+      'duct',
+      'girder',
+      'chain',
+      'cable',
+      'rust',
+      'lgmetal',
+    ],
   ],
   [
     'floor',
