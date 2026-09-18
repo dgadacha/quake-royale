@@ -60,7 +60,14 @@ export interface Level {
   /** Marques et éclats actuellement à l'écran. */
   effectsInfo(): { decals: number; particles: number };
   /** Détail des adversaires, pour la mise au point. */
-  enemyStates(): { kind: string; state: string; health: number; origin: Vec3 }[];
+  enemyStates(): {
+    kind: string;
+    state: string;
+    health: number;
+    origin: Vec3;
+    yaw: number;
+    perception: { sees: boolean; inFront: boolean; noticed: boolean; distance: number } | null;
+  }[];
   /** Restreint le dessin à ce qui est visible depuis un point. */
   updateVisibility(playerPosition: Vec3): void;
   visibilityInfo(): { leaf: number; drawn: number; total: number; enabled: boolean };
@@ -428,6 +435,10 @@ export async function loadBspLevel(
       return damage;
     },
     fire(origin, direction, damage) {
+      // Une détonation ne passe pas inaperçue : les créatures proches n'ont
+      // plus besoin d'avoir le joueur droit devant pour le remarquer.
+      enemyManager.hear(origin);
+
       const result = fireRay(
         playerCollision,
         enemies,
@@ -479,6 +490,10 @@ export async function loadBspLevel(
         state: enemy.state,
         health: enemy.health,
         origin: [...enemy.origin] as Vec3,
+        // Le lacet dit où la créature regarde : sans lui, impossible de
+        // vérifier qu'elle ignore bien ce qui se passe dans son dos.
+        yaw: enemy.yaw,
+        perception: enemyManager.perceptionOf(enemy),
       })),
     enemyInfo: () => ({
       total: enemies.length,
