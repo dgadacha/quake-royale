@@ -319,6 +319,22 @@ export class Viewmodel {
     return { ...this.pose };
   }
 
+  /** Diagnostic : ce que contient réellement la scène de l'arme. */
+  inspect(): { meshes: number; visibles: number; triangles: number; enfants: number } {
+    let meshes = 0;
+    let visibles = 0;
+    let triangles = 0;
+    this.holder.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      meshes++;
+      if (mesh.visible) visibles++;
+      const index = mesh.geometry?.getIndex();
+      triangles += index ? index.count / 3 : 0;
+    });
+    return { meshes, visibles, triangles, enfants: this.holder.children.length };
+  }
+
   /** Décalage courant dû au recul, au balancement et à la traîne. */
   getMotion(): { position: [number, number, number]; rotation: [number, number, number] } {
     return {
@@ -440,10 +456,14 @@ export class Viewmodel {
     this.keyLight.color.copy(state.keyColor);
     this.fillLight.color.copy(state.keyColor).lerp(new THREE.Color(0.7, 0.78, 1), 0.5);
 
-    this.fillLight.intensity = 0.2 + brightness * 0.55;
-    this.keyLight.intensity = 0.35 + brightness * 1.7;
-    this.lampLight.intensity = 0.9 - brightness * 0.6;
-    this.scene.environmentIntensity = 0.5 + brightness * 0.9;
+    // Plancher d'éclairage volontairement haut : la clarté estimée vient des
+    // entités lumineuses, alors que le décor tire la sienne de son éclairage
+    // cuit. Dans un couloir clair sans source déclarée à proximité, une arme
+    // asservie à la seule estimation deviendrait invisible.
+    this.fillLight.intensity = 0.55 + brightness * 0.5;
+    this.keyLight.intensity = 1.2 + brightness * 1.4;
+    this.lampLight.intensity = 1.1 - brightness * 0.5;
+    this.scene.environmentIntensity = 0.9 + brightness * 0.8;
 
     // L'éclair part de la bouche, pas d'un point fixe de la scène : il suit
     // donc le recul et le balancement de l'arme.

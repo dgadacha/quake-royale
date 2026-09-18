@@ -39,7 +39,7 @@ export const defaultGraphics = (): GraphicsSettings => ({
   aoRadius: 38,
   reflections: true,
   // Un sol de pierre n'est pas un miroir : au-delà, la salle paraît vernie.
-  reflectionStrength: 0.35,
+  reflectionStrength: 0.18,
   bloom: true,
   bloomStrength: 0.55,
   grain: true,
@@ -114,7 +114,7 @@ export const qualityPresets: Record<
     aoIntensity: 1.15,
     aoRadius: 38,
     reflections: true,
-    reflectionStrength: 0.35,
+    reflectionStrength: 0.18,
     bloom: true,
     bloomStrength: 0.55,
     grain: true,
@@ -134,7 +134,7 @@ export const qualityPresets: Record<
     aoIntensity: 1.25,
     aoRadius: 44,
     reflections: true,
-    reflectionStrength: 0.45,
+    reflectionStrength: 0.26,
     bloom: true,
     bloomStrength: 0.55,
     grain: true,
@@ -157,12 +157,24 @@ export function applyPreset(preset: Exclude<QualityPreset, 'custom'>): GraphicsS
 
 const STORAGE_KEY = 'quake-hd.graphics';
 
+/**
+ * Version des réglages conservés.
+ *
+ * Les choix d'un joueur priment sur les valeurs par défaut, y compris sur
+ * celles corrigées depuis. Changer ce numéro écarte les anciens réglages :
+ * à faire quand une valeur par défaut est revue parce que l'ancienne était
+ * mauvaise, pas à chaque ajout.
+ */
+const STORAGE_VERSION = 2;
+
 export function loadGraphics(): GraphicsSettings {
   const defaults = defaultGraphics();
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (!stored) return defaults;
-    return { ...defaults, ...(JSON.parse(stored) as Partial<GraphicsSettings>) };
+    const parsed = JSON.parse(stored) as Partial<GraphicsSettings> & { version?: number };
+    if (parsed.version !== STORAGE_VERSION) return defaults;
+    return { ...defaults, ...parsed };
   } catch {
     // Stockage indisponible ou contenu illisible : on repart des valeurs par défaut.
     return defaults;
@@ -171,7 +183,7 @@ export function loadGraphics(): GraphicsSettings {
 
 export function saveGraphics(settings: GraphicsSettings): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...settings, version: STORAGE_VERSION }));
   } catch {
     // Le réglage vaudra pour la session en cours seulement.
   }

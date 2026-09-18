@@ -117,6 +117,11 @@ export function installHarness(session: Session): void {
       return value;
     },
 
+    /** Contenu de la scène de l'arme. */
+    weaponScene() {
+      return session.viewmodel.inspect();
+    },
+
     /** Lit ou ajuste la position de la bouche du canon. */
     muzzle(offset?: [number, number, number]) {
       const viewmodel = session.viewmodel;
