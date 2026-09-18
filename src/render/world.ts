@@ -487,9 +487,14 @@ export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions
       }
       geometry.vertexCount += face.edgeCount;
 
+      // Triangulation en éventail, enroulée dans le sens de la normale.
+      //
+      // Les arêtes d'une face sont parcourues dans l'ordre inverse de celui
+      // qu'attend le rendu : gardé tel quel, le décor est éliminé comme s'il
+      // n'était vu que de dos, et il ne reste qu'une moitié des surfaces.
       const indexStart = geometry.indices.length;
       for (let i = 1; i < face.edgeCount - 1; i++) {
-        geometry.indices.push(first, first + i, first + i + 1);
+        geometry.indices.push(first, first + i + 1, first + i);
       }
       geometry.faceRanges.push({
         face: model.firstFace + f,
@@ -537,14 +542,9 @@ export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions
         }
       }
 
-      // Seul le monde est soumis à la visibilité précalculée : les portes et
-      // les plateformes ne figurent pas dans les feuilles de l'arbre.
-      //
-      // Le ciel en est exclu lui aussi. Il tient lieu de fond, visible depuis
-      // partout où il apparaît, alors que les feuilles ne le déclarent que
-      // pour une poignée d'endroits : le soumettre au tri le ferait
-      // disparaître au profit d'un trou noir.
-      if (modelIndex === 0 && bucket.kind !== 'sky' && bucket.geometry.faceRanges.length > 0) {
+      // Seul le monde peut être soumis à la visibilité précalculée : les
+      // portes et les plateformes ne figurent pas dans les feuilles.
+      if (modelIndex === 0 && bucket.geometry.faceRanges.length > 0) {
         const fullIndex = Uint32Array.from(bucket.geometry.indices);
         const work = new THREE.BufferAttribute(new Uint32Array(fullIndex.length), 1);
         work.setUsage(THREE.DynamicDrawUsage);

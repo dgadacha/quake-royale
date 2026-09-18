@@ -167,6 +167,24 @@ export function installHarness(session: Session): void {
       return session.playerRef?.health ?? 0;
     },
 
+    /**
+     * Force le rendu des deux faces de chaque surface.
+     * Si le décor manquant réapparaît, c'est que l'enroulement des triangles
+     * ne correspond pas à leur normale.
+     */
+    doubleSided(on = true) {
+      let count = 0;
+      session.scene.traverse((object) => {
+        const material = (object as { material?: { side?: number; needsUpdate?: boolean } })
+          .material;
+        if (!material || material.side === undefined) return;
+        material.side = on ? 2 : 0;
+        material.needsUpdate = true;
+        count++;
+      });
+      return { materiaux: count, recto_verso: on };
+    },
+
     /** Visibilité : feuille courante et faces réellement dessinées. */
     visibility(enabled?: boolean) {
       const level = session.currentLevel;

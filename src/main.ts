@@ -128,6 +128,13 @@ function showGraphicsPanel(note?: string): void {
       value: settings.shadows,
     },
     {
+      key: 'visibilityCulling',
+      label: 'Tri des surfaces',
+      hint: "N'affiche que ce que la carte déclare visible depuis votre position.",
+      kind: 'toggle',
+      value: settings.visibilityCulling,
+    },
+    {
       key: 'brightness',
       label: 'Luminosité',
       hint: "Intensité de l'éclairage cuit des cartes.",

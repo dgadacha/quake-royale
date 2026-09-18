@@ -198,6 +198,7 @@ export class Session {
     this.scene.add(level.root);
     this.player = new Player(level.collision, level.spawn, level.spawnYaw);
     level.setLighting(this.graphics.brightness, this.graphics.contrast);
+    level.setVisibilityEnabled(this.graphics.visibilityCulling);
     this.hdLights.setLights(level.hdLights);
     this.hdLights.setVisibilityTest((from, to) => level.isVisible(from, to));
     this.hdLights.setBudget({
