@@ -13,9 +13,10 @@ import { ImpactParticles } from '../render/impactParticles';
 import { surfaceAt } from './entities/SurfaceProbe';
 import type { AudioEngine } from '../audio/AudioEngine';
 import { creatureSounds, pick, soundTable, type CreatureEvent } from '../audio/soundTable';
-import { collectEnemies, enemyModels } from './entities/Enemy';
+import { collectEnemies, detailedEnemyModels, enemyModels } from './entities/Enemy';
 import { parseMdl, type MdlModel } from '../formats/mdl';
 import { EnemyManager } from './entities/EnemyManager';
+import { loadTransferredModel, type TransferredSource } from '../render/transferredModel';
 import { EnemyRenderer } from '../render/enemyRenderer';
 import { fireRay } from './entities/Combat';
 import { collectMovers } from './entities/BrushEntity';
@@ -309,6 +310,31 @@ export async function loadBspLevel(
   onProgress(0.82, 'Occupants du niveau');
   await breathe();
 
+  // Maillages détaillés : seulement pour les adversaires réellement présents,
+  // et seulement s'ils ont été préparés. Leur absence ne change rien au jeu.
+  const detailed = new Map<string, TransferredSource>();
+  const present = new Set(enemies.map((enemy) => enemy.classname));
+  for (const [classname, url] of Object.entries(detailedEnemyModels)) {
+    if (!present.has(classname)) continue;
+    const source = loadEnemyModel(classname);
+    if (!source) continue;
+    try {
+      const model = await loadTransferredModel(url, source);
+      detailed.set(classname, model);
+      const info = model.info;
+      console.info(
+        `[quake-hd] ${classname} : maillage détaillé de ${info.vertexCount} sommets, ` +
+          `${info.frameCount} images, ${Math.round(info.weaponShare * 100)} % rattachés à l'arme, ` +
+          `quart de tour ${info.turn}°, ${Math.round(info.elapsed)} ms`,
+      );
+    } catch (error) {
+      // Sans maillage détaillé, le modèle d'origine fait l'affaire : on le dit
+      // plutôt que de laisser croire que le remplacement a eu lieu.
+      console.warn(`[quake-hd] maillage détaillé ignoré pour ${classname} : ${(error as Error).message}`);
+    }
+    await breathe();
+  }
+
   const enemyRenderer = new EnemyRenderer(enemies, loadEnemyModel, palette, {
     anisotropy: options.anisotropy,
     ambient: options.ambient,
@@ -316,7 +342,7 @@ export async function loadBspLevel(
     fogDensity: options.fogDensity,
     lightScale: options.lightScale,
     emissiveStrength: options.emissiveStrength,
-  });
+  }, detailed);
 
   // Traces laissées par les tirs et éclats projetés à l'impact.
   const decals = new DecalPool();

@@ -90,6 +90,17 @@ export function profileFor(classname: string): EnemyProfile {
  * montée localement : aucun n'est fourni ici. Un nom absent de la table, ou
  * dont le fichier manque, retombe sur la silhouette construite par le code.
  */
+/**
+ * Maillages détaillés venant remplacer ceux du jeu.
+ *
+ * Ils sont préparés par tools/prepare-enemy.mjs et restent facultatifs : sans
+ * le fichier, l'adversaire s'affiche avec son modèle d'origine. Les animations
+ * viennent de toute façon de celui-ci.
+ */
+export const detailedEnemyModels: Record<string, string> = {
+  monster_army: 'data/hd/models/soldier.glb',
+};
+
 export const enemyModels: Record<string, string> = {
   monster_army: 'progs/soldier.mdl',
   monster_dog: 'progs/dog.mdl',

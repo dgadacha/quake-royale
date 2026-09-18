@@ -28,6 +28,12 @@ export interface SurfaceBinding {
   offset: Float32Array;
   /** Part de chaque référence dans le résultat, déjà normalisée. */
   weight: Float32Array;
+  /**
+   * Position de repos, gardée pour les sommets qu'aucun triangle ne réclame.
+   * Sans elle, un tel sommet part à l'origine du modèle et tire derrière lui
+   * une traînée visible à travers tout le décor.
+   */
+  fallback: Float32Array;
 }
 
 /** Positions d'une image du modèle, converties dans le repère du rendu. */
@@ -177,6 +183,96 @@ export function modelParts(model: MdlModel): Int32Array {
   return parts;
 }
 
+/** Rôles reconnus dans le découpage d'un modèle du jeu. */
+export interface ModelRoles {
+  /** Pièce la plus fournie : le corps. */
+  body: number;
+  /** Pièce la plus élancée en dehors du corps : l'arme, ou -1 s'il n'y en a pas. */
+  weapon: number;
+}
+
+/**
+ * Reconnaît le corps et l'arme dans le découpage d'un modèle.
+ *
+ * Une arme tenue en main est bien plus élancée qu'un torse ou qu'une cuisse :
+ * c'est à cela qu'on la reconnaît, et non au rang de sa pièce, qui ne veut
+ * rien dire.
+ */
+export function identifyParts(model: MdlModel): ModelRoles {
+  const parts = modelParts(model);
+  const rest = frameToRenderSpace(model, 0);
+
+  const members = new Map<number, number[]>();
+  for (let t = 0; t < model.triangles.length; t++) {
+    let list = members.get(parts[t]);
+    if (!list) {
+      list = [];
+      members.set(parts[t], list);
+    }
+    for (const v of model.triangles[t].vertices) if (!list.includes(v)) list.push(v);
+  }
+
+  let body = 0;
+  let bodySize = -1;
+  for (const [part, vertices] of members) {
+    if (vertices.length > bodySize) {
+      bodySize = vertices.length;
+      body = part;
+    }
+  }
+
+  // Une arme est élancée, mais surtout grande : un petit détail accroché au
+  // corps est proportionnellement tout aussi élancé qu'un fusil, et le
+  // confondre avec lui étire le maillage détaillé à travers tout le modèle.
+  const modelHeight = (() => {
+    let low = Infinity;
+    let high = -Infinity;
+    for (let v = 0; v < model.vertexCount; v++) {
+      low = Math.min(low, rest[v * 3 + 1]);
+      high = Math.max(high, rest[v * 3 + 1]);
+    }
+    return high - low;
+  })();
+  const minimumLength = modelHeight * 0.2;
+
+  let weapon = -1;
+  let best = 2;
+  for (const [part, vertices] of members) {
+    if (part === body || vertices.length < 4) continue;
+    const centre = [0, 1, 2].map(
+      (k) => vertices.reduce((sum, v) => sum + rest[v * 3 + k], 0) / vertices.length,
+    );
+    let axis = [1, 0.3, 0.2];
+    for (let it = 0; it < 80; it++) {
+      const r = [0, 0, 0];
+      for (const v of vertices) {
+        const d = [rest[v * 3] - centre[0], rest[v * 3 + 1] - centre[1], rest[v * 3 + 2] - centre[2]];
+        const dot = d[0] * axis[0] + d[1] * axis[1] + d[2] * axis[2];
+        for (let k = 0; k < 3; k++) r[k] += d[k] * dot;
+      }
+      const norm = Math.hypot(r[0], r[1], r[2]);
+      if (norm < 1e-20) break;
+      axis = r.map((x) => x / norm);
+    }
+    let along = 0;
+    let across = 0;
+    for (const v of vertices) {
+      const d = [rest[v * 3] - centre[0], rest[v * 3 + 1] - centre[1], rest[v * 3 + 2] - centre[2]];
+      const a = d[0] * axis[0] + d[1] * axis[1] + d[2] * axis[2];
+      along = Math.max(along, Math.abs(a));
+      across = Math.max(across, Math.hypot(d[0] - a * axis[0], d[1] - a * axis[1], d[2] - a * axis[2]));
+    }
+    if (along * 2 < minimumLength) continue;
+    const slender = across > 0 ? along / across : 0;
+    if (slender > best) {
+      best = slender;
+      weapon = part;
+    }
+  }
+
+  return { body, weapon };
+}
+
 export interface BindOptions {
   /** Triangles de référence par sommet ; au-delà de un, les jointures se lissent. */
   neighbours?: number;
@@ -216,6 +312,7 @@ export function bindToModel(
     bary: new Float32Array(vertexCount * neighbours * 3),
     offset: new Float32Array(vertexCount * neighbours * 3),
     weight: new Float32Array(vertexCount * neighbours),
+    fallback: new Float32Array(positions),
   };
 
   const bary = new Float32Array(3);
@@ -350,6 +447,11 @@ export function bindToModel(
       total += w;
     }
 
+    // Tous les voisins écartés : on s'en remet au plus proche, faute de mieux.
+    if (total === 0 && binding.triangle[v * neighbours] >= 0) {
+      binding.weight[v * neighbours] = 1;
+      total = 1;
+    }
     if (total > 0) {
       for (let k = 0; k < neighbours; k++) binding.weight[v * neighbours + k] /= total;
     }
@@ -375,6 +477,7 @@ export function evaluateFrame(
 
   for (let v = 0; v < vertexCount; v++) {
     let x = 0, y = 0, z = 0;
+    let carried = 0;
     for (let k = 0; k < neighbours; k++) {
       const base = v * neighbours + k;
       const t = binding.triangle[base];
@@ -401,6 +504,14 @@ export function evaluateFrame(
       }
 
       x += qx * w; y += qy * w; z += qz * w;
+      carried += w;
+    }
+    if (carried <= 0) {
+      // Personne ne porte ce sommet : il reste où il était.
+      out[v * 3] = binding.fallback[v * 3];
+      out[v * 3 + 1] = binding.fallback[v * 3 + 1];
+      out[v * 3 + 2] = binding.fallback[v * 3 + 2];
+      continue;
     }
     out[v * 3] = x;
     out[v * 3 + 1] = y;

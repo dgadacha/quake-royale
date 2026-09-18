@@ -3,7 +3,7 @@ import type { MdlModel } from '../formats/mdl';
 import type { Palette } from '../formats/palette';
 import { buildTextureSet, type TextureSet } from './textures';
 
-const vertexShader = /* glsl */ `
+export const aliasVertexShader = /* glsl */ `
 attribute vec3 aNextPosition;
 
 uniform float uBlend;
@@ -21,7 +21,7 @@ void main() {
 }
 `;
 
-const fragmentShader = /* glsl */ `
+export const aliasFragmentShader = /* glsl */ `
 precision highp float;
 
 uniform sampler2D uMap;
@@ -153,8 +153,8 @@ export class AliasModel {
     empty.needsUpdate = true;
 
     this.material = new THREE.ShaderMaterial({
-      vertexShader,
-      fragmentShader,
+      vertexShader: aliasVertexShader,
+      fragmentShader: aliasFragmentShader,
       uniforms: {
         uMap: { value: this.textureSet.map },
         uSurface: { value: this.textureSet.surfaceMap },

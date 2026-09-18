@@ -3,6 +3,7 @@ import type { Enemy } from '../game/entities/Enemy';
 import { quakeToThree } from './world';
 import { SHADOW_CASTER_LAYER } from './shadows';
 import { AliasModel, type AliasModelOptions } from './aliasModel';
+import type { TransferredModel, TransferredSource } from './transferredModel';
 import {
   detectAnimations,
   rangeForState,
@@ -61,8 +62,8 @@ export interface EnemyView {
   group: THREE.Group;
   /** Présent seulement sur la silhouette de substitution. */
   eyeMaterial: THREE.MeshBasicMaterial | null;
-  /** Présent quand un modèle a pu être chargé. */
-  model: AliasModel | null;
+  /** Présent quand un modèle a pu être chargé, détaillé ou d'origine. */
+  model: AliasModel | TransferredModel | null;
   animations: Map<AnimationKind, AnimationRange> | null;
   current: AnimationRange | null;
   elapsed: number;
@@ -81,6 +82,7 @@ export class EnemyRenderer {
     loader: EnemyModelLoader | null = null,
     palette: Palette | null = null,
     options: AliasModelOptions | null = null,
+    detailed: Map<string, TransferredSource> | null = null,
   ) {
     this.root.name = 'enemies';
 
@@ -88,8 +90,10 @@ export class EnemyRenderer {
       const parsed = loader && palette && options ? loader(enemy.classname) : null;
 
       if (parsed) {
-        // Modèle disponible : il porte sa propre apparence et ses séquences.
-        const model = new AliasModel(parsed, palette!, options!);
+        // Le maillage détaillé, quand il existe, remplace celui d'origine sans
+        // rien changer aux séquences : elles sont lues sur le même modèle.
+        const source = detailed?.get(enemy.classname) ?? null;
+        const model = source ? source.create(options!) : new AliasModel(parsed, palette!, options!);
         model.mesh.layers.enable(SHADOW_CASTER_LAYER);
         const group = new THREE.Group();
         group.add(model.mesh);
@@ -153,9 +157,10 @@ export class EnemyRenderer {
 
       const [x, y, z] = quakeToThree(enemy.origin[0], enemy.origin[1], enemy.origin[2]);
       group.position.set(x, y, z);
-      // Le lacet du jeu tourne autour de la verticale, inversé au passage
-      // dans le repère de rendu.
-      group.rotation.y = -enemy.yaw;
+      // Le passage au repère de rendu est une rotation, qui conserve le sens :
+      // le lacet se transmet tel quel. L'inverser retournait les créatures en
+      // miroir, et l'on voyait tirer de dos un adversaire qui vous visait.
+      group.rotation.y = enemy.yaw;
 
       if (view.model && view.animations) {
         // Changer de séquence remet le compteur à zéro, sinon une mort
