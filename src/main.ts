@@ -128,6 +128,26 @@ function showGraphicsPanel(note?: string): void {
       value: settings.shadows,
     },
     {
+      key: 'brightness',
+      label: 'Luminosité',
+      hint: "Intensité de l'éclairage cuit des cartes.",
+      kind: 'range',
+      value: settings.brightness,
+      min: 1,
+      max: 5,
+      step: 0.1,
+    },
+    {
+      key: 'contrast',
+      label: 'Profondeur des ombres',
+      hint: 'Vers le bas, les zones sombres s\'éclaircissent ; vers le haut, elles se creusent.',
+      kind: 'range',
+      value: settings.contrast,
+      min: 0.7,
+      max: 1.8,
+      step: 0.05,
+    },
+    {
       key: 'ambientOcclusion',
       label: 'Occlusion ambiante',
       hint: "Assombrit les angles, les recoins et les contacts entre volumes.",
@@ -336,16 +356,23 @@ async function startLevel(factory: () => Level | Promise<Level>, label: string):
 session.setStatsListener((stats) => {
   if (!statsVisible) return;
   const health = stats.health > 0 ? `<b>${stats.health}</b> pv` : '<b>abattu</b>';
+  const weapon = ` · ${session.currentWeapon.name}`;
   const enemies = stats.enemiesAlive > 0
     ? ` · ${stats.enemiesAlive} adversaires` + (stats.enemiesAwake > 0 ? ` (${stats.enemiesAwake} en alerte)` : '')
     : '';
   overlay.setStats(
-    `${health}${enemies}<br />` +
+    `${health}${weapon}${enemies}<br />` +
       `<b>${stats.fps.toFixed(0)}</b> fps · <b>${stats.speed.toFixed(0)}</b> u/s<br />` +
       `x ${stats.position[0].toFixed(0)} y ${stats.position[1].toFixed(0)} z ${stats.position[2].toFixed(0)}<br />` +
       `${stats.draws} appels · ${stats.faces} faces · ${stats.textures} textures`,
   );
 });
+
+canvas.addEventListener('wheel', (event) => {
+  if (!session.currentLevel) return;
+  event.preventDefault();
+  session.cycleWeapon(event.deltaY > 0 ? 1 : -1);
+}, { passive: false });
 
 canvas.addEventListener('click', () => {
   // Un navigateur n'autorise le son qu'après une action de l'utilisateur.
@@ -361,6 +388,13 @@ document.addEventListener('pointerlockchange', () => {
 });
 
 window.addEventListener('keydown', (event) => {
+  // Choix direct d'une arme par son rang.
+  const digit = /^Digit([1-9])$/.exec(event.code);
+  if (digit && session.currentLevel) {
+    void session.selectWeapon(Number.parseInt(digit[1], 10) - 1);
+    return;
+  }
+
   if (event.code === 'Escape' && session.currentLevel && !session.input.locked) {
     session.stop();
     refreshMenu();

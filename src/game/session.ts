@@ -8,7 +8,7 @@ import { ShadowMapper } from '../render/shadows';
 import type { AudioEngine } from '../audio/AudioEngine';
 import { pick, soundTable } from '../audio/soundTable';
 import { Viewmodel } from '../render/viewmodel';
-import shotgunUrl from '../../assets/shotgun.glb?url';
+import { weaponAt, weapons, type WeaponDefinition } from './weapons';
 import { defaultWorldOptions, quakeToThree, type WorldOptions } from '../render/world';
 import { InputManager } from './input';
 import type { Level } from './level';
@@ -51,6 +51,8 @@ export class Session {
   private muzzleGlow = 0;
   /** Compte à rebours avant réapparition. */
   private deathTimer = 0;
+  private weaponIndex = 0;
+  private fireCooldown = 0;
   private audio: AudioEngine | null = null;
   /** État précédent, pour ne déclencher un son qu'au moment du changement. */
   private wasOnGround = true;
@@ -104,9 +106,7 @@ export class Session {
 
     // L'arme est volumineuse : elle se charge en tâche de fond et apparaît
     // dès qu'elle est prête, sans retarder l'entrée dans le niveau.
-    void this.viewmodel.load(shotgunUrl).catch((error: unknown) => {
-      console.warn(`[quake-hd] arme non chargée : ${(error as Error).message}`);
-    });
+    void this.selectWeapon(0, true);
 
     window.addEventListener('resize', this.onResize);
   }
@@ -117,6 +117,54 @@ export class Session {
 
   setAudio(audio: AudioEngine): void {
     this.audio = audio;
+  }
+
+  get currentWeapon(): WeaponDefinition {
+    return weaponAt(this.weaponIndex);
+  }
+
+  /** Sort une arme ; le changement est ignoré tant qu'un autre est en cours. */
+  async selectWeapon(index: number, immediate = false): Promise<void> {
+    const next = weaponAt(index);
+    if (!immediate && (next.id === this.currentWeapon.id || this.viewmodel.isSwitching)) return;
+    this.weaponIndex = ((index % weapons.length) + weapons.length) % weapons.length;
+    try {
+      await this.viewmodel.equip(next.url, next.pose, next.muzzle, immediate);
+    } catch (error) {
+      console.warn(`[quake-hd] arme non chargée : ${(error as Error).message}`);
+    }
+  }
+
+  cycleWeapon(direction: number): void {
+    void this.selectWeapon(this.weaponIndex + direction);
+  }
+
+  /** Écarte une direction de tir, pour une gerbe de projectiles. */
+  private scatter(aim: [number, number, number], amount: number): [number, number, number] {
+    // Deux axes perpendiculaires à la visée suffisent à disperser la gerbe.
+    const up: [number, number, number] = Math.abs(aim[2]) > 0.9 ? [1, 0, 0] : [0, 0, 1];
+    const right: [number, number, number] = [
+      aim[1] * up[2] - aim[2] * up[1],
+      aim[2] * up[0] - aim[0] * up[2],
+      aim[0] * up[1] - aim[1] * up[0],
+    ];
+    const rightLength = Math.hypot(right[0], right[1], right[2]) || 1;
+    const perp: [number, number, number] = [
+      aim[1] * right[2] - aim[2] * right[1],
+      aim[2] * right[0] - aim[0] * right[2],
+      aim[0] * right[1] - aim[1] * right[0],
+    ];
+    const perpLength = Math.hypot(perp[0], perp[1], perp[2]) || 1;
+
+    const a = (Math.random() * 2 - 1) * amount;
+    const b = (Math.random() * 2 - 1) * amount;
+    const result: [number, number, number] = [
+      aim[0] + (right[0] / rightLength) * a + (perp[0] / perpLength) * b,
+      aim[1] + (right[1] / rightLength) * a + (perp[1] / perpLength) * b,
+      aim[2] + (right[2] / rightLength) * a + (perp[2] / perpLength) * b,
+    ];
+    const length = Math.hypot(result[0], result[1], result[2]) || 1;
+    return [result[0] / length, result[1] / length, result[2] / length];
   }
 
   private playSound(list: readonly string[], volume = 1): void {
@@ -149,6 +197,7 @@ export class Session {
     this.level = level;
     this.scene.add(level.root);
     this.player = new Player(level.collision, level.spawn, level.spawnYaw);
+    level.setLighting(this.graphics.brightness, this.graphics.contrast);
     this.hdLights.setLights(level.hdLights);
     this.hdLights.setVisibilityTest((from, to) => level.isVisible(from, to));
     this.hdLights.setBudget({
@@ -303,13 +352,29 @@ export class Session {
       const dying = this.deathTimer > 0 ? 0.7 : 0;
       this.post.setDamage(Math.max(hurtFlash, lava, dying));
 
-      if (this.player.consumeAttack() && this.player.health > 0) {
-        this.viewmodel.fire();
+      this.fireCooldown = Math.max(0, this.fireCooldown - delta);
+      if (
+        this.player.consumeAttack() &&
+        this.player.health > 0 &&
+        this.fireCooldown <= 0 &&
+        !this.viewmodel.isSwitching
+      ) {
+        const weapon = this.currentWeapon;
+        this.fireCooldown = weapon.cooldown;
+        this.viewmodel.fire(weapon.recoil);
         this.muzzleGlow = 1;
-        this.playSound(soundTable.weaponFire, 0.7);
+        this.playSound(weapon.fireSounds, 0.7);
+
         // Le tir part de l'oeil et suit la visée, pas le canon : c'est ce que
-        // le joueur vise qui doit être touché.
-        this.level.fire(this.player.eyeOrigin, this.player.aimDirection, 24);
+        // le joueur vise qui doit être touché. Une arme à gerbe lance
+        // plusieurs projectiles dispersés autour de cet axe.
+        const origin = this.player.eyeOrigin;
+        const aim = this.player.aimDirection;
+        for (let shot = 0; shot < weapon.pellets; shot++) {
+          const direction =
+            weapon.pellets === 1 ? aim : this.scatter(aim, weapon.spread / 100);
+          this.level.fire(origin, direction, weapon.damage);
+        }
       }
 
       // La lumière dominante du niveau est ramenée dans le repère de la vue :

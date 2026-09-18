@@ -207,6 +207,8 @@ export interface BuiltWorld {
   setVisibleFaces(visible: Uint8Array | null): void;
   getDrawnFaces(): number;
   setDynamicLights(count: number, diffuse: number, specular: number): void;
+  /** Intensité et creux de l'éclairage cuit, réglables en cours de partie. */
+  setLighting(brightness: number, contrast: number): void;
   setShadow(
     map: THREE.Texture,
     matrix: THREE.Matrix4,
@@ -537,7 +539,12 @@ export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions
 
       // Seul le monde est soumis à la visibilité précalculée : les portes et
       // les plateformes ne figurent pas dans les feuilles de l'arbre.
-      if (modelIndex === 0 && bucket.geometry.faceRanges.length > 0) {
+      //
+      // Le ciel en est exclu lui aussi. Il tient lieu de fond, visible depuis
+      // partout où il apparaît, alors que les feuilles ne le déclarent que
+      // pour une poignée d'endroits : le soumettre au tri le ferait
+      // disparaître au profit d'un trou noir.
+      if (modelIndex === 0 && bucket.kind !== 'sky' && bucket.geometry.faceRanges.length > 0) {
         const fullIndex = Uint32Array.from(bucket.geometry.indices);
         const work = new THREE.BufferAttribute(new Uint32Array(fullIndex.length), 1);
         work.setUsage(THREE.DynamicDrawUsage);
@@ -643,6 +650,14 @@ export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions
     drawnFaces = drawn;
   };
 
+  const setLighting = (brightness: number, contrast: number) => {
+    for (const material of allMaterials) {
+      const uniforms = material.uniforms;
+      if (uniforms.uLightScale) uniforms.uLightScale.value = brightness;
+      if (uniforms.uLightGamma) uniforms.uLightGamma.value = contrast;
+    }
+  };
+
   const setDynamicLights = (count: number, diffuse: number, specular: number) => {
     for (const material of allMaterials) {
       const uniforms = material.uniforms;
@@ -693,6 +708,7 @@ export function buildWorld(bsp: BspData, palette: Palette, options: WorldOptions
     surfaceLights,
     setFlashlight,
     setVisibleFaces,
+    setLighting,
     getDrawnFaces: () => drawnFaces,
     setDynamicLights,
     setShadow,

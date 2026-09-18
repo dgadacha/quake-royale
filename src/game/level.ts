@@ -36,6 +36,7 @@ export interface Level {
   /** Sources dynamiques de la carte. */
   hdLights: HDLight[];
   setDynamicLights(count: number, diffuse: number, specular: number): void;
+  setLighting(brightness: number, contrast: number): void;
   setShadow(
     map: THREE.Texture,
     matrix: THREE.Matrix4,
@@ -508,6 +509,7 @@ export async function loadBspLevel(
       return trace.fraction >= 0.999;
     },
     setDynamicLights: world.setDynamicLights,
+    setLighting: world.setLighting,
     setShadow: world.setShadow,
     styleIntensity: world.styleIntensity,
     update(time) {
@@ -547,6 +549,7 @@ export function loadDemoLevel(options: WorldOptions): Level {
     hdLights: demo.hdLights,
     isVisible: demo.isVisible,
     setDynamicLights: demo.setDynamicLights,
+    setLighting: demo.setLighting,
     setShadow: demo.setShadow,
     updateEntities: () => {
       // L'arène de démonstration n'a pas de volume mobile.

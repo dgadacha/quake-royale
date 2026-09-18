@@ -20,6 +20,10 @@ export interface GraphicsSettings {
   lightSpecular: number;
   shadows: boolean;
   shadowResolution: number;
+  /** Intensité de l'éclairage cuit. */
+  brightness: number;
+  /** Creuse ou aplanit les zones peu éclairées. */
+  contrast: number;
   /** Préréglage dont les valeurs sont issues, ou 'custom' après un ajustement. */
   preset: QualityPreset;
 }
@@ -44,6 +48,9 @@ export const defaultGraphics = (): GraphicsSettings => ({
   lightSpecular: 1.0,
   shadows: true,
   shadowResolution: 1024,
+  brightness: 2.1,
+  // Plus la valeur est haute, plus les zones sombres s'enfoncent.
+  contrast: 1.15,
   preset: 'high',
 });
 
@@ -72,6 +79,8 @@ export const qualityPresets: Record<
     lightSpecular: 0.8,
     shadows: false,
     shadowResolution: 512,
+    brightness: 2.1,
+    contrast: 1.15,
   },
   medium: {
     ambientOcclusion: true,
@@ -89,6 +98,8 @@ export const qualityPresets: Record<
     lightSpecular: 1,
     shadows: true,
     shadowResolution: 1024,
+    brightness: 2.1,
+    contrast: 1.15,
   },
   high: {
     ambientOcclusion: true,
@@ -106,6 +117,8 @@ export const qualityPresets: Record<
     lightSpecular: 1,
     shadows: true,
     shadowResolution: 1024,
+    brightness: 2.1,
+    contrast: 1.15,
   },
   ultra: {
     ambientOcclusion: true,
@@ -123,6 +136,8 @@ export const qualityPresets: Record<
     lightSpecular: 1.15,
     shadows: true,
     shadowResolution: 2048,
+    brightness: 2.1,
+    contrast: 1.15,
   },
 };
 

@@ -115,6 +115,12 @@ export class Viewmodel {
   private readonly holder = new THREE.Group();
   private model: THREE.Object3D | null = null;
   private pose: ViewmodelPose = { ...defaultPose };
+  /** Modèles déjà chargés, conservés pour que le retour soit immédiat. */
+  private readonly loaded = new Map<string, THREE.Group>();
+  /** Avancement du rangement : 0 arme sortie, 1 arme baissée hors du cadre. */
+  private stowProgress = 0;
+  private stowing = false;
+  private pendingSwap: (() => void) | null = null;
 
   private readonly keyLight: THREE.DirectionalLight;
   private readonly fillLight: THREE.AmbientLight;
@@ -214,7 +220,15 @@ export class Viewmodel {
     return this.ready;
   }
 
-  async load(url: string): Promise<void> {
+  /**
+   * Prépare un modèle et le conserve.
+   * Les fichiers sont lourds : une arme déjà sortie une fois doit revenir sans
+   * attente, et une arme jamais choisie ne doit pas peser en mémoire.
+   */
+  private async prepare(url: string): Promise<THREE.Group> {
+    const cached = this.loaded.get(url);
+    if (cached) return cached;
+
     const loader = new GLTFLoader();
     const gltf = await loader.loadAsync(url);
     const model = gltf.scene;
@@ -246,11 +260,46 @@ export class Viewmodel {
     normalizer.scale.setScalar(1 / longest);
     normalizer.add(model);
 
-    this.holder.clear();
-    this.holder.add(normalizer);
-    this.model = model;
-    this.applyPose();
-    this.ready = true;
+    this.loaded.set(url, normalizer);
+    return normalizer;
+  }
+
+  /**
+   * Sort une arme. Si une autre est en main, elle est d'abord rangée : un
+   * échange instantané se verrait comme un défaut.
+   */
+  async equip(
+    url: string,
+    pose: ViewmodelPose,
+    muzzle: [number, number, number],
+    immediate = false,
+  ): Promise<void> {
+    const normalizer = await this.prepare(url);
+
+    const apply = () => {
+      this.holder.clear();
+      this.holder.add(normalizer);
+      this.model = normalizer;
+      this.pose = { ...pose };
+      this.muzzleLocal.set(muzzle[0], muzzle[1], muzzle[2]);
+      this.applyPose();
+      this.ready = true;
+    };
+
+    if (immediate || !this.ready) {
+      apply();
+      this.stowProgress = 0;
+      this.stowing = false;
+      this.pendingSwap = null;
+      return;
+    }
+
+    this.pendingSwap = apply;
+    this.stowing = true;
+  }
+
+  get isSwitching(): boolean {
+    return this.stowing || this.stowProgress > 0.01;
   }
 
   private applyPose(): void {
@@ -282,10 +331,10 @@ export class Viewmodel {
     };
   }
 
-  fire(): void {
+  fire(strength = 7.5): void {
     // Le recul s'additionne d'un coup à l'autre, mais reste borné : une
     // cadence élevée ne doit pas pouvoir repousser l'arme hors du cadre.
-    this.recoilVelocity = Math.min(this.recoilVelocity + 7.5, 11);
+    this.recoilVelocity = Math.min(this.recoilVelocity + strength, strength * 1.5 + 4);
     this.muzzleFlash = 1;
     // Orientation tirée au sort à chaque coup, sinon l'éclair se répète.
     const material = this.muzzleFlashMesh.material as THREE.ShaderMaterial;
@@ -354,17 +403,31 @@ export class Viewmodel {
       this.recoilVelocity = 0;
     }
 
+    // Rangement et sortie lors d'un changement d'arme.
+    if (this.stowing) {
+      this.stowProgress = Math.min(1, this.stowProgress + deltaTime * 5.5);
+      if (this.stowProgress >= 1) {
+        // L'échange a lieu hors du cadre, jamais sous les yeux du joueur.
+        this.pendingSwap?.();
+        this.pendingSwap = null;
+        this.stowing = false;
+      }
+    } else if (this.stowProgress > 0) {
+      this.stowProgress = Math.max(0, this.stowProgress - deltaTime * 4.5);
+    }
+
     // L'arme s'abaisse en course et sous l'eau.
     const lowerTarget = state.underwater ? 1 : moving && ratio > 0.85 ? 0.35 : 0;
     this.lowerAmount = THREE.MathUtils.damp(this.lowerAmount, lowerTarget, 6, deltaTime);
+    const stow = this.stowProgress;
 
     this.animated.position.set(
       bobX + this.swayX,
-      bobY + this.swayY - this.lowerAmount * 0.12,
+      bobY + this.swayY - this.lowerAmount * 0.12 - stow * 0.42,
       this.recoil * 0.1,
     );
     this.animated.rotation.set(
-      -this.recoil * 0.22 + this.lowerAmount * 0.22,
+      -this.recoil * 0.22 + this.lowerAmount * 0.22 + stow * 0.9,
       this.swayX * 0.7,
       this.swayX * 0.8 - this.lowerAmount * 0.12,
     );
@@ -402,6 +465,7 @@ export class Viewmodel {
   }
 
   dispose(): void {
+    this.loaded.clear();
     this.cubeTarget.dispose();
     this.environmentTarget?.dispose();
     this.pmrem?.dispose();
