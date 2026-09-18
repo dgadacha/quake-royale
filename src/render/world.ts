@@ -50,7 +50,9 @@ export const defaultWorldOptions = (anisotropy: number): WorldOptions => ({
   fogDensity: 0.00035,
   specular: 0.55,
   emissiveStrength: 1.6,
-  detailStrength: 0.35,
+  // Le grain de proximité s'ajoute à toutes les normales sans distinction :
+  // trop fort, il martèle uniformément le décor et efface les familles.
+  detailStrength: 0.12,
   atlasSize: 2048,
   hdMaterials: null,
   lightPositions: Array.from({ length: MAX_ACTIVE_LIGHTS }, () => new THREE.Vector4()),

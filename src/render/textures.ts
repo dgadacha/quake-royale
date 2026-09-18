@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Palette } from '../formats/palette';
 import type { BspMipTexture } from '../formats/bsp';
+import { profileFor, type MaterialProfile } from './surfaceProfiles';
 
 export interface TextureSet {
   /** Couleur de base, agrandie et filtrée. */
@@ -11,6 +12,8 @@ export interface TextureSet {
   emissiveMap: THREE.Texture | null;
   width: number;
   height: number;
+  /** Famille de matériau déduite du nom, et ses propriétés. */
+  profile: MaterialProfile;
 }
 
 /**
@@ -73,17 +76,57 @@ function luminance(rgba: Uint8Array, width: number, height: number): Float32Arra
 }
 
 /**
- * Normale dérivée du relief apparent de la texture (Sobel sur la luminance)
- * et rugosité déduite du contraste local : les surfaces claires et lisses
- * réfléchissent plus que les zones sales et bruitées.
+ * Champ de flaques : un bruit doux et cyclique, pour que l'humidité se pose
+ * par plaques et se répète sans couture d'une dalle à l'autre.
+ */
+function puddleField(width: number, height: number): Float32Array {
+  const cells = 4;
+  const seeds = new Float32Array(cells * cells);
+  let state = 0x9e3779b9;
+  for (let i = 0; i < seeds.length; i++) {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    seeds[i] = state / 0xffffffff;
+  }
+  const seed = (cx: number, cy: number) =>
+    seeds[((cy + cells) % cells) * cells + ((cx + cells) % cells)];
+  const smooth = (t: number) => t * t * (3 - 2 * t);
+
+  const field = new Float32Array(width * height);
+  for (let y = 0; y < height; y++) {
+    const fy = (y / height) * cells;
+    const cy = Math.floor(fy);
+    const ty = smooth(fy - cy);
+    for (let x = 0; x < width; x++) {
+      const fx = (x / width) * cells;
+      const cx = Math.floor(fx);
+      const tx = smooth(fx - cx);
+      const top = seed(cx, cy) * (1 - tx) + seed(cx + 1, cy) * tx;
+      const bottom = seed(cx, cy + 1) * (1 - tx) + seed(cx + 1, cy + 1) * tx;
+      const value = top * (1 - ty) + bottom * ty;
+      // Seul le haut du bruit devient flaque : le reste du sol reste sec.
+      field[y * width + x] = Math.max(0, value - 0.58) / 0.42;
+    }
+  }
+  return field;
+}
+
+/**
+ * Relief et rugosité déduits de la texture.
+ *
+ * Le relief vient de la pente de la luminance, la rugosité du détail local :
+ * un joint creusé, une salissure ou une rayure diffusent, une surface lisse et
+ * claire réfléchit. Les deux restent bornés par la famille du matériau, sans
+ * quoi toutes les surfaces finissent avec le même aspect verni.
  */
 function buildSurfaceMap(
   rgba: Uint8Array,
   width: number,
   height: number,
   strength: number,
+  profile: MaterialProfile,
 ): Uint8Array<ArrayBuffer> {
   const lum = luminance(rgba, width, height);
+  const puddles = profile.wetness > 0 ? puddleField(width, height) : null;
   const out = new Uint8Array(width * height * 4);
   const at = (x: number, y: number) => lum[((y + height) % height) * width + ((x + width) % width)];
 
@@ -98,18 +141,35 @@ function buildSurfaceMap(
       const b = at(x, y + 1);
       const br = at(x + 1, y + 1);
 
-      const dx = tl + 2 * l + bl - (tr + 2 * r + br);
-      const dy = tl + 2 * t + tr - (bl + 2 * b + br);
+      // Le noyau de Sobel cumule quatre fois la pente : sans le ramener à
+      // l'échelle, le relief part en bas-relief et la rugosité sature au
+      // premier détail venu, ce qui rend toutes les surfaces identiques.
+      const dx = (tl + 2 * l + bl - (tr + 2 * r + br)) / 4;
+      const dy = (tl + 2 * t + tr - (bl + 2 * b + br)) / 4;
 
-      const nx = dx * strength;
-      const ny = dy * strength;
+      const nx = dx * strength * profile.normalScale;
+      const ny = dy * strength * profile.normalScale;
       const nz = 1;
       const inv = 1 / Math.hypot(nx, ny, nz);
 
-      // Contraste local : plus il est fort, plus la surface est traitée comme mate.
+      // Le détail local module la rugosité à l'intérieur de la plage du
+      // matériau : les creux et les salissures vers le mat, les surfaces
+      // lisses et claires vers le poli.
       const center = at(x, y);
-      const contrast = Math.min(1, Math.abs(dx) + Math.abs(dy));
-      const roughness = Math.min(1, 0.55 + contrast * 0.35 - center * 0.15);
+      // Le contraste local repère les joints, les rayures et les salissures ;
+      // la luminance sépare les zones usées des surfaces propres. C'est de là
+      // que vient la rugosité, et non d'une valeur unique par matériau.
+      const contrast = Math.min(1, (Math.abs(dx) + Math.abs(dy)) * 4.5);
+      const variation = Math.max(0, Math.min(1, contrast * 0.62 + (1 - center) * 0.38));
+      let roughness =
+        profile.roughnessMin + (profile.roughnessMax - profile.roughnessMin) * variation;
+
+      // L'eau stagne par plaques dans les creux, jamais sur toute la dalle :
+      // c'est ce qui distingue un sol humide d'un sol verni.
+      if (puddles) {
+        const wet = puddles[y * width + x] * profile.wetness * (0.45 + (1 - center) * 0.55);
+        roughness = roughness * (1 - wet) + 0.18 * wet;
+      }
 
       const o = (y * width + x) * 4;
       out[o] = encode(nx * inv);
@@ -145,6 +205,8 @@ export interface TextureOptions {
   /** Nombre de doublements de résolution appliqués aux petites textures. */
   maxUpscale?: number;
   normalStrength?: number;
+  /** Famille imposée ; sinon déduite du nom de la texture. */
+  profile?: MaterialProfile;
 }
 
 export function buildTextureSet(
@@ -153,7 +215,9 @@ export function buildTextureSet(
   options: TextureOptions,
 ): TextureSet {
   const maxUpscale = options.maxUpscale ?? 2;
-  const normalStrength = options.normalStrength ?? 2.2;
+  // Amplitude de base, tempérée ensuite par la famille du matériau.
+  const normalStrength = options.normalStrength ?? 3.0;
+  const profile = options.profile ?? profileFor(mip.name);
 
   let indices =
     mip.pixels && mip.pixels.length >= mip.width * mip.height
@@ -176,7 +240,7 @@ export function buildTextureSet(
   const rgba = palette.expand(indices, width, height, transparent);
   const map = makeTexture(rgba, width, height, THREE.SRGBColorSpace, options.anisotropy);
 
-  const surface = buildSurfaceMap(rgba, width, height, normalStrength);
+  const surface = buildSurfaceMap(rgba, width, height, normalStrength, profile);
   const surfaceMap = makeTexture(surface, width, height, THREE.NoColorSpace, options.anisotropy);
 
   const emissiveData = palette.emissiveMask(indices, width, height);
@@ -184,7 +248,7 @@ export function buildTextureSet(
     ? makeTexture(emissiveData, width, height, THREE.SRGBColorSpace, 1)
     : null;
 
-  return { map, surfaceMap, emissiveMap, width, height };
+  return { map, surfaceMap, emissiveMap, width, height, profile };
 }
 
 /** Damier de secours pour une texture absente des données montées. */

@@ -48,7 +48,7 @@ export function createWorldMaterial(
       uHasHdAo: { value: hd?.ao ? 1 : 0 },
       uNormalScale: { value: hd?.normalScale ?? 1 },
       uTextureScale: { value: hd?.textureScale ?? 1 },
-      uMetalness: { value: hd?.metalnessValue ?? 0 },
+      uMetalness: { value: hd?.metalnessValue ?? set.profile.metalness },
       uEmissive: { value: hd?.emissive ?? set.emissiveMap ?? fallbackTexture },
       uHasEmissive: { value: hd?.emissive || set.emissiveMap ? 1 : 0 },
       uLightmap: { value: lightmap },
@@ -57,7 +57,10 @@ export function createWorldMaterial(
       uLightScale: { value: settings.lightScale },
       uLightGamma: { value: settings.lightGamma },
       uAmbient: { value: settings.ambient },
-      uSpecular: { value: settings.specular },
+      // Le spéculaire suit la famille du matériau : une pierre ne renvoie pas
+      // ce que renvoie une plaque d'acier.
+      uSpecular: { value: settings.specular * (hd ? 1 : set.profile.specular) },
+      uRelief: { value: set.profile.relief },
       uDetailScale: { value: 7.0 },
       uDetailStrength: { value: settings.detailStrength },
       uLightmapTexel: { value: 1 / settings.atlasSize },

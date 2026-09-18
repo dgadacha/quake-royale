@@ -60,6 +60,7 @@ uniform float uLightScale;
 uniform float uLightGamma;
 uniform vec3 uAmbient;
 uniform float uSpecular;
+uniform float uRelief;
 uniform float uDetailScale;
 uniform float uDetailStrength;
 uniform float uLightmapTexel;
@@ -153,7 +154,9 @@ void main() {
   vec3 lightDirTangent = normalize(vec3((ll - lr) * 4.0, (ld - lu) * 4.0, 0.6));
   vec3 lightDir = normalize(tbn * lightDirTangent);
 
-  float relief = mix(1.0, clamp(dot(normal, lightDir) * 0.5 + 0.7, 0.0, 1.35), 0.85);
+  // Le modelé que le relief imprime au diffus dépend de la matière : une
+  // plaque rivetée se sculpte, un mur de béton reste plat.
+  float relief = mix(1.0, clamp(dot(normal, lightDir) * 0.5 + 0.7, 0.0, 1.35), uRelief);
   vec3 diffuse = albedo.rgb * light * relief;
 
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
