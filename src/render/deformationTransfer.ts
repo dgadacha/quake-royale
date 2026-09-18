@@ -305,6 +305,7 @@ export function bindToModel(
   const parts = options.respectParts === false ? null : modelParts(model);
   const forced = options.forcedParts ?? null;
 
+
   const binding: SurfaceBinding = {
     vertexCount,
     neighbours,
@@ -442,6 +443,10 @@ export function bindToModel(
       }
 
       // Les triangles proches pèsent davantage, sans jamais devenir infinis.
+      // Élargir cette portée ne sert à rien : deux triangles voisins dans
+      // l'espace peuvent appartenir à des membres opposés, et les mélanger
+      // tire le sommet entre les deux. La continuité se rétablit après coup,
+      // sur le maillage détaillé lui-même, où le voisinage a un sens.
       const w = 1 / (bestDistance[k] + 1e-4);
       binding.weight[base] = w;
       total += w;
@@ -458,6 +463,68 @@ export function bindToModel(
   }
 
   return binding;
+}
+
+/** Voisinage d'un maillage détaillé, tiré de ses triangles. */
+export function buildAdjacency(indices: ArrayLike<number>, vertexCount: number): Int32Array[] {
+  const lists: Int32Array[] = new Array(vertexCount);
+  const temp: number[][] = new Array(vertexCount);
+  for (let v = 0; v < vertexCount; v++) temp[v] = [];
+  const link = (a: number, b: number) => {
+    if (!temp[a].includes(b)) temp[a].push(b);
+  };
+  for (let t = 0; t + 2 < indices.length; t += 3) {
+    const a = indices[t];
+    const b = indices[t + 1];
+    const c = indices[t + 2];
+    link(a, b); link(b, a); link(b, c); link(c, b); link(c, a); link(a, c);
+  }
+  for (let v = 0; v < vertexCount; v++) lists[v] = Int32Array.from(temp[v]);
+  return lists;
+}
+
+/**
+ * Adoucit le déplacement, et lui seul.
+ *
+ * Chaque sommet suit le triangle du modèle d'origine dont il est le plus
+ * proche. Deux sommets voisins peuvent donc suivre deux triangles qui
+ * s'inclinent différemment, et l'arête entre eux se déchire. Lisser les
+ * positions effacerait le relief du maillage ; lisser l'écart au repos ne
+ * touche qu'à la façon dont l'animation le transporte, et rend la surface
+ * continue sans lui retirer un seul détail.
+ */
+export function smoothDisplacement(
+  positions: Float32Array,
+  rest: Float32Array,
+  adjacency: Int32Array[],
+  passes = 3,
+): void {
+  const count = adjacency.length;
+  let shift = new Float32Array(positions.length);
+  for (let i = 0; i < positions.length; i++) shift[i] = positions[i] - rest[i];
+
+  for (let pass = 0; pass < passes; pass++) {
+    const next = new Float32Array(shift.length);
+    for (let v = 0; v < count; v++) {
+      const neighbours = adjacency[v];
+      let x = shift[v * 3];
+      let y = shift[v * 3 + 1];
+      let z = shift[v * 3 + 2];
+      for (let k = 0; k < neighbours.length; k++) {
+        const other = neighbours[k];
+        x += shift[other * 3];
+        y += shift[other * 3 + 1];
+        z += shift[other * 3 + 2];
+      }
+      const total = neighbours.length + 1;
+      next[v * 3] = x / total;
+      next[v * 3 + 1] = y / total;
+      next[v * 3 + 2] = z / total;
+    }
+    shift = next;
+  }
+
+  for (let i = 0; i < positions.length; i++) positions[i] = rest[i] + shift[i];
 }
 
 /**

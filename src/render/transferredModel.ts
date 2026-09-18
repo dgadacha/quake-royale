@@ -4,10 +4,12 @@ import type { MdlModel } from '../formats/mdl';
 import { aliasFragmentShader, aliasVertexShader, type AliasModelOptions } from './aliasModel';
 import {
   bindToModel,
+  buildAdjacency,
   evaluateFrame,
   frameToRenderSpace,
   identifyParts,
   modelParts,
+  smoothDisplacement,
 } from './deformationTransfer';
 
 /**
@@ -19,6 +21,16 @@ import {
  * mélange entre deux images se fait ensuite sur la carte graphique, comme pour
  * les modèles du jeu, sans rien recalculer pendant la partie.
  */
+
+/**
+ * Passes d'adoucissement du déplacement.
+ *
+ * Chaque sommet suit le triangle dont il est le plus proche, et deux voisins
+ * peuvent suivre deux triangles qui s'inclinent différemment : sans ces
+ * passes, le maillage se déchire dès qu'il s'anime. Huit suffisent à ramener
+ * la course et le tir sous le pour cent de sommets malmenés.
+ */
+const SMOOTHING_PASSES = 8;
 
 /** Quart de tour candidats : les exportateurs ne s'accordent pas sur l'avant. */
 const TURNS = [0, 90, 180, 270];
@@ -268,28 +280,58 @@ export async function loadTransferredModel(url: string, model: MdlModel): Promis
   const turn = bestTurn(positions, rest, target);
   const fitted = fitTo(rotateY(positions, turn), target);
 
-  // L'outil de préparation marque d'un l'arme du maillage : elle doit suivre
-  // l'arme du modèle d'origine, et non la main qui la tient.
+  // L'outil de préparation dit quelle part de chaque sommet revient à l'arme.
+  // Elle vaut un sur le fusil, zéro sur le corps, et passe progressivement de
+  // l'un à l'autre autour de la poignée : le maillage détaillé est d'un seul
+  // tenant là où le modèle d'origine tient son arme dans une pièce détachée,
+  // et trancher net à cet endroit déchirerait la main.
   const roles = identifyParts(model);
   const marks = geometry.getAttribute('_part');
-  const forced = new Int32Array(fitted.length / 3);
+  const count = fitted.length / 3;
+  const share = new Float32Array(count);
   let weaponVertices = 0;
-  for (let v = 0; v < forced.length; v++) {
-    const isWeapon = marks ? marks.getX(v) > 0.5 : false;
-    if (isWeapon && roles.weapon >= 0) {
-      forced[v] = roles.weapon;
-      weaponVertices++;
-    } else {
-      forced[v] = roles.body;
+  if (marks && roles.weapon >= 0) {
+    for (let v = 0; v < count; v++) {
+      share[v] = Math.max(0, Math.min(1, marks.getX(v)));
+      if (share[v] > 0.5) weaponVertices++;
     }
   }
 
-  const binding = bindToModel(model, fitted, { neighbours: 4, forcedParts: forced });
+  // Une attache par pièce, mélangées ensuite : c'est ce que fait n'importe
+  // quel habillage de squelette, à ceci près que les « os » sont ici les
+  // morceaux du modèle d'origine.
+  const toBody = new Int32Array(count).fill(roles.body);
+  const bodyBinding = bindToModel(model, fitted, { neighbours: 4, forcedParts: toBody });
+  const weaponBinding =
+    roles.weapon >= 0
+      ? bindToModel(model, fitted, {
+          neighbours: 4,
+          forcedParts: new Int32Array(count).fill(roles.weapon),
+        })
+      : null;
+
+  const indexAttribute = geometry.getIndex();
+  const adjacency = indexAttribute
+    ? buildAdjacency(indexAttribute.array as ArrayLike<number>, count)
+    : null;
 
   const frames: Float32Array[] = [];
+  const held = weaponBinding ? new Float32Array(fitted.length) : null;
   for (let f = 0; f < model.frames.length; f++) {
+    const pose = frameToRenderSpace(model, f);
     const out = new Float32Array(fitted.length);
-    evaluateFrame(binding, model, frameToRenderSpace(model, f), out);
+    evaluateFrame(bodyBinding, model, pose, out);
+    if (weaponBinding && held) {
+      evaluateFrame(weaponBinding, model, pose, held);
+      for (let v = 0; v < count; v++) {
+        const w = share[v];
+        if (w <= 0) continue;
+        out[v * 3] += (held[v * 3] - out[v * 3]) * w;
+        out[v * 3 + 1] += (held[v * 3 + 1] - out[v * 3 + 1]) * w;
+        out[v * 3 + 2] += (held[v * 3 + 2] - out[v * 3 + 2]) * w;
+      }
+    }
+    if (adjacency) smoothDisplacement(out, fitted, adjacency, SMOOTHING_PASSES);
     frames.push(out);
   }
 
@@ -304,9 +346,9 @@ export async function loadTransferredModel(url: string, model: MdlModel): Promis
     frames,
     {
       turn,
-      vertexCount: forced.length,
+      vertexCount: count,
       frameCount: frames.length,
-      weaponShare: forced.length > 0 ? weaponVertices / forced.length : 0,
+      weaponShare: count > 0 ? weaponVertices / count : 0,
       elapsed: performance.now() - started,
     },
   );

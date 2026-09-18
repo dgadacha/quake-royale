@@ -291,8 +291,51 @@ for (let v = 0; v < count; v++) {
 const outIndices = new Uint32Array(simplified.length);
 for (let i = 0; i < simplified.length; i++) outIndices[i] = remap[simplified[i]];
 
+// Le maillage détaillé est d'un seul tenant, alors que le modèle d'origine
+// tient son arme dans une pièce détachée. Trancher net entre les deux déchire
+// la poignée : les triangles qui relient la main au fusil sont tirés chacun de
+// leur côté. On adoucit donc l'appartenance sur quelques rangs de sommets, ce
+// qui laisse la transition s'étirer doucement au lieu de se rompre.
+const neighbours = new Map();
+const link = (a, b) => {
+  let list = neighbours.get(a);
+  if (!list) {
+    list = [];
+    neighbours.set(a, list);
+  }
+  if (!list.includes(b)) list.push(b);
+};
+for (let t = 0; t < outIndices.length; t += 3) {
+  const [a, b, c] = [outIndices[t], outIndices[t + 1], outIndices[t + 2]];
+  link(a, b); link(b, a); link(b, c); link(c, b); link(c, a); link(a, c);
+}
+let blend = Float32Array.from(outPart);
+for (let pass = 0; pass < 6; pass++) {
+  const next = new Float32Array(kept);
+  for (let v = 0; v < kept; v++) {
+    const list = neighbours.get(v);
+    if (!list || list.length === 0) {
+      next[v] = blend[v];
+      continue;
+    }
+    let sum = blend[v];
+    for (const other of list) sum += blend[other];
+    next[v] = sum / (list.length + 1);
+  }
+  blend = next;
+}
+// Les extrémités doivent rester franches : seul le voisinage de la frontière
+// mérite d'être partagé.
+for (let v = 0; v < kept; v++) {
+  const t = Math.max(0, Math.min(1, (blend[v] - 0.15) / 0.7));
+  outPart[v] = t * t * (3 - 2 * t);
+}
+
 const shares = new Map();
-for (let i = 0; i < kept; i++) shares.set(outPart[i], (shares.get(outPart[i]) ?? 0) + 1);
+for (let i = 0; i < kept; i++) {
+  const bucket = outPart[i] < 0.02 ? 'corps' : outPart[i] > 0.98 ? 'arme' : 'transition';
+  shares.set(bucket, (shares.get(bucket) ?? 0) + 1);
+}
 
 // ----------------------------------------------------------- écriture
 
@@ -382,7 +425,9 @@ console.log(
     segParts.map((p, i) => `${p.name || i} élancement ${slender[i].toFixed(2)}${i === weaponPart ? ' <- arme' : ''}`).join(', '),
 );
 console.log(
-  `parties  arme ${(100 * (shares.get(1) ?? 0) / kept).toFixed(1)} %, corps ${(100 * (shares.get(0) ?? 0) / kept).toFixed(1)} %`,
+  `parties  arme ${(100 * (shares.get('arme') ?? 0) / kept).toFixed(1)} %, ` +
+    `corps ${(100 * (shares.get('corps') ?? 0) / kept).toFixed(1)} %, ` +
+    `transition ${(100 * (shares.get('transition') ?? 0) / kept).toFixed(1)} %`,
 );
 console.log(`textures ${(avant / 1048576).toFixed(1)} Mo ramenés à ${(apres / 1048576).toFixed(1)} Mo (${TEXTURE_SIZE} px)`);
 console.log(`écrit    ${outPath} (${(Buffer.byteLength(readFileSync(outPath)) / 1048576).toFixed(1)} Mo)`);
