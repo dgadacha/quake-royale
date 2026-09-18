@@ -4,7 +4,7 @@ import type { MdlModel } from '../formats/mdl';
 import { aliasFragmentShader, aliasVertexShader, type AliasModelOptions } from './aliasModel';
 import {
   bindToModel,
-  buildAdjacency,
+  buildSmoothing,
   evaluateFrame,
   frameToRenderSpace,
   identifyParts,
@@ -311,8 +311,8 @@ export async function loadTransferredModel(url: string, model: MdlModel): Promis
       : null;
 
   const indexAttribute = geometry.getIndex();
-  const adjacency = indexAttribute
-    ? buildAdjacency(indexAttribute.array as ArrayLike<number>, count)
+  const smoothing = indexAttribute
+    ? buildSmoothing(fitted, indexAttribute.array as ArrayLike<number>)
     : null;
 
   const frames: Float32Array[] = [];
@@ -331,7 +331,7 @@ export async function loadTransferredModel(url: string, model: MdlModel): Promis
         out[v * 3 + 2] += (held[v * 3 + 2] - out[v * 3 + 2]) * w;
       }
     }
-    if (adjacency) smoothDisplacement(out, fitted, adjacency, SMOOTHING_PASSES);
+    if (smoothing) smoothDisplacement(out, fitted, smoothing, SMOOTHING_PASSES);
     frames.push(out);
   }
 

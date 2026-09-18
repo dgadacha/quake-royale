@@ -296,38 +296,60 @@ for (let i = 0; i < simplified.length; i++) outIndices[i] = remap[simplified[i]]
 // la poignée : les triangles qui relient la main au fusil sont tirés chacun de
 // leur côté. On adoucit donc l'appartenance sur quelques rangs de sommets, ce
 // qui laisse la transition s'étirer doucement au lieu de se rompre.
-const neighbours = new Map();
-const link = (a, b) => {
-  let list = neighbours.get(a);
-  if (!list) {
-    list = [];
-    neighbours.set(a, list);
+// L'exportateur coupe le maillage le long des coutures de texture : plusieurs
+// sommets au même endroit, que les triangles ne relient pas. Adoucir sans les
+// souder leur donnerait des appartenances différentes, et la couture
+// s'ouvrirait dès que le corps et l'arme divergent.
+const owner = new Int32Array(kept);
+const byPosition = new Map();
+let owners = 0;
+for (let v = 0; v < kept; v++) {
+  const key = `${outPosition[v * 3].toFixed(5)},${outPosition[v * 3 + 1].toFixed(5)},${outPosition[v * 3 + 2].toFixed(5)}`;
+  let id = byPosition.get(key);
+  if (id === undefined) {
+    id = owners++;
+    byPosition.set(key, id);
   }
-  if (!list.includes(b)) list.push(b);
+  owner[v] = id;
+}
+
+const neighbours = new Array(owners);
+for (let i = 0; i < owners; i++) neighbours[i] = [];
+const link = (a, b) => {
+  if (a !== b && !neighbours[a].includes(b)) neighbours[a].push(b);
 };
 for (let t = 0; t < outIndices.length; t += 3) {
-  const [a, b, c] = [outIndices[t], outIndices[t + 1], outIndices[t + 2]];
+  const a = owner[outIndices[t]];
+  const b = owner[outIndices[t + 1]];
+  const c = owner[outIndices[t + 2]];
   link(a, b); link(b, a); link(b, c); link(c, b); link(c, a); link(a, c);
 }
-let blend = Float32Array.from(outPart);
+
+let blend = new Float32Array(owners);
+const share = new Float32Array(owners);
+for (let v = 0; v < kept; v++) {
+  blend[owner[v]] += outPart[v];
+  share[owner[v]]++;
+}
+for (let i = 0; i < owners; i++) if (share[i] > 0) blend[i] /= share[i];
+
 for (let pass = 0; pass < 6; pass++) {
-  const next = new Float32Array(kept);
-  for (let v = 0; v < kept; v++) {
-    const list = neighbours.get(v);
-    if (!list || list.length === 0) {
-      next[v] = blend[v];
-      continue;
-    }
-    let sum = blend[v];
+  const next = new Float32Array(owners);
+  for (let i = 0; i < owners; i++) {
+    const list = neighbours[i];
+    let sum = blend[i];
     for (const other of list) sum += blend[other];
-    next[v] = sum / (list.length + 1);
+    next[i] = sum / (list.length + 1);
   }
   blend = next;
 }
+// Chaque sommet reprend la valeur de son représentant : les sommets confondus
+// gardent exactement la même appartenance.
+for (let v = 0; v < kept; v++) outPart[v] = blend[owner[v]];
 // Les extrémités doivent rester franches : seul le voisinage de la frontière
 // mérite d'être partagé.
 for (let v = 0; v < kept; v++) {
-  const t = Math.max(0, Math.min(1, (blend[v] - 0.15) / 0.7));
+  const t = Math.max(0, Math.min(1, (outPart[v] - 0.15) / 0.7));
   outPart[v] = t * t * (3 - 2 * t);
 }
 

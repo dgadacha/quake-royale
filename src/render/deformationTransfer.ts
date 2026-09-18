@@ -465,22 +465,58 @@ export function bindToModel(
   return binding;
 }
 
-/** Voisinage d'un maillage détaillé, tiré de ses triangles. */
-export function buildAdjacency(indices: ArrayLike<number>, vertexCount: number): Int32Array[] {
-  const lists: Int32Array[] = new Array(vertexCount);
-  const temp: number[][] = new Array(vertexCount);
-  for (let v = 0; v < vertexCount; v++) temp[v] = [];
+/**
+ * Plan d'adoucissement d'un maillage détaillé.
+ *
+ * Un exportateur coupe le maillage le long des coutures de texture : deux
+ * sommets au même endroit, mais d'index différents, parce qu'ils ne portent
+ * pas les mêmes coordonnées d'image. Les triangles ne les relient pas, et
+ * adoucir sans le savoir les fait dériver chacun de son côté : la couture
+ * s'ouvre et le modèle part en morceaux. Ils doivent donc partager un même
+ * représentant, et recevoir exactement le même déplacement.
+ */
+export interface SmoothingPlan {
+  /** Représentant de chaque sommet ; les sommets confondus partagent le leur. */
+  representative: Int32Array;
+  /** Voisins de chaque représentant. */
+  adjacency: Int32Array[];
+  /** Nombre de représentants distincts. */
+  count: number;
+}
+
+export function buildSmoothing(
+  positions: Float32Array,
+  indices: ArrayLike<number>,
+): SmoothingPlan {
+  const vertexCount = positions.length / 3;
+  const representative = new Int32Array(vertexCount);
+  const byPosition = new Map<string, number>();
+  let count = 0;
+  for (let v = 0; v < vertexCount; v++) {
+    const key = `${positions[v * 3].toFixed(4)},${positions[v * 3 + 1].toFixed(4)},${positions[v * 3 + 2].toFixed(4)}`;
+    let owner = byPosition.get(key);
+    if (owner === undefined) {
+      owner = count++;
+      byPosition.set(key, owner);
+    }
+    representative[v] = owner;
+  }
+
+  const temp: number[][] = new Array(count);
+  for (let i = 0; i < count; i++) temp[i] = [];
   const link = (a: number, b: number) => {
-    if (!temp[a].includes(b)) temp[a].push(b);
+    if (a !== b && !temp[a].includes(b)) temp[a].push(b);
   };
   for (let t = 0; t + 2 < indices.length; t += 3) {
-    const a = indices[t];
-    const b = indices[t + 1];
-    const c = indices[t + 2];
+    const a = representative[indices[t]];
+    const b = representative[indices[t + 1]];
+    const c = representative[indices[t + 2]];
     link(a, b); link(b, a); link(b, c); link(c, b); link(c, a); link(a, c);
   }
-  for (let v = 0; v < vertexCount; v++) lists[v] = Int32Array.from(temp[v]);
-  return lists;
+  const adjacency: Int32Array[] = new Array(count);
+  for (let i = 0; i < count; i++) adjacency[i] = Int32Array.from(temp[i]);
+
+  return { representative, adjacency, count };
 }
 
 /**
@@ -496,20 +532,35 @@ export function buildAdjacency(indices: ArrayLike<number>, vertexCount: number):
 export function smoothDisplacement(
   positions: Float32Array,
   rest: Float32Array,
-  adjacency: Int32Array[],
+  plan: SmoothingPlan,
   passes = 3,
 ): void {
-  const count = adjacency.length;
-  let shift = new Float32Array(positions.length);
-  for (let i = 0; i < positions.length; i++) shift[i] = positions[i] - rest[i];
+  const vertexCount = positions.length / 3;
+  const { representative, adjacency, count } = plan;
+
+  let shift = new Float32Array(count * 3);
+  const share = new Float32Array(count);
+  for (let v = 0; v < vertexCount; v++) {
+    const owner = representative[v];
+    shift[owner * 3] += positions[v * 3] - rest[v * 3];
+    shift[owner * 3 + 1] += positions[v * 3 + 1] - rest[v * 3 + 1];
+    shift[owner * 3 + 2] += positions[v * 3 + 2] - rest[v * 3 + 2];
+    share[owner]++;
+  }
+  for (let i = 0; i < count; i++) {
+    if (share[i] === 0) continue;
+    shift[i * 3] /= share[i];
+    shift[i * 3 + 1] /= share[i];
+    shift[i * 3 + 2] /= share[i];
+  }
 
   for (let pass = 0; pass < passes; pass++) {
     const next = new Float32Array(shift.length);
-    for (let v = 0; v < count; v++) {
-      const neighbours = adjacency[v];
-      let x = shift[v * 3];
-      let y = shift[v * 3 + 1];
-      let z = shift[v * 3 + 2];
+    for (let i = 0; i < count; i++) {
+      const neighbours = adjacency[i];
+      let x = shift[i * 3];
+      let y = shift[i * 3 + 1];
+      let z = shift[i * 3 + 2];
       for (let k = 0; k < neighbours.length; k++) {
         const other = neighbours[k];
         x += shift[other * 3];
@@ -517,14 +568,20 @@ export function smoothDisplacement(
         z += shift[other * 3 + 2];
       }
       const total = neighbours.length + 1;
-      next[v * 3] = x / total;
-      next[v * 3 + 1] = y / total;
-      next[v * 3 + 2] = z / total;
+      next[i * 3] = x / total;
+      next[i * 3 + 1] = y / total;
+      next[i * 3 + 2] = z / total;
     }
     shift = next;
   }
 
-  for (let i = 0; i < positions.length; i++) positions[i] = rest[i] + shift[i];
+  // Les sommets confondus repartent du même déplacement : la couture tient.
+  for (let v = 0; v < vertexCount; v++) {
+    const owner = representative[v];
+    positions[v * 3] = rest[v * 3] + shift[owner * 3];
+    positions[v * 3 + 1] = rest[v * 3 + 1] + shift[owner * 3 + 1];
+    positions[v * 3 + 2] = rest[v * 3 + 2] + shift[owner * 3 + 2];
+  }
 }
 
 /**
