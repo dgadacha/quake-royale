@@ -8,5 +8,8 @@ reference/
 # Le manifeste décrit une installation locale : il est réécrit par les outils.
 public/data/manifest.json
 public/data/maps/*.bsp
+# Modèles détaillés préparés par tools/prepare-enemy.mjs : ils dérivent des
+# données du jeu et pèsent lourd.
+public/data/hd/
 public/data/*.pak
 public/data/**/*.pak

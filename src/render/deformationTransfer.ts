@@ -185,6 +185,12 @@ export interface BindOptions {
    * Sans quoi un point du fusil s'accroche à la main qui le tient.
    */
   respectParts?: boolean;
+  /**
+   * Pièce imposée pour chaque sommet détaillé, quand on la connaît déjà —
+   * un maillage livré en parties séparées dit lui-même où est son arme.
+   * Vaut mieux que la proximité, qui ne peut que la deviner.
+   */
+  forcedParts?: Int32Array;
 }
 
 /**
@@ -201,6 +207,7 @@ export function bindToModel(
   const triangles = model.triangles;
   const vertexCount = positions.length / 3;
   const parts = options.respectParts === false ? null : modelParts(model);
+  const forced = options.forcedParts ?? null;
 
   const binding: SurfaceBinding = {
     vertexCount,
@@ -228,7 +235,9 @@ export function bindToModel(
     // Première passe : de quelle pièce ce sommet relève-t-il ? La seconde ne
     // cherchera plus qu'à l'intérieur de celle-là.
     let part = -1;
-    if (parts) {
+    if (forced) {
+      part = forced[v];
+    } else if (parts) {
       let nearestDistance = Infinity;
       for (let t = 0; t < triangles.length; t++) {
         const [i0, i1, i2] = triangles[t].vertices;
@@ -246,7 +255,7 @@ export function bindToModel(
     }
 
     for (let t = 0; t < triangles.length; t++) {
-      if (parts && parts[t] !== part) continue;
+      if (parts && part >= 0 && parts[t] !== part) continue;
       const [i0, i1, i2] = triangles[t].vertices;
       const a = i0 * 3, b = i1 * 3, c = i2 * 3;
       closestPointOnTriangle(px, py, pz, rest, a, b, c, bary);
