@@ -2,6 +2,7 @@ import { PakArchive, VirtualFileSystem } from './formats/pak';
 import { loadBspLevel, loadDemoLevel, type Level } from './game/level';
 import { Session } from './game/session';
 import { Overlay, type GraphicsRow } from './ui/overlay';
+import { buildCatalog, readMapTitle } from './game/mapCatalog';
 import { applyPreset, type QualityPreset } from './render/graphics';
 import { installHarness } from './dev/harness';
 import { loadEntityMapping, type EntityModelMap } from './game/entityModels';
@@ -85,14 +86,18 @@ async function fetchRemoteMap(path: string): Promise<void> {
 }
 
 function refreshMenu(note?: string): void {
-  const maps = [...new Set([...vfs.list('maps/', '.bsp'), ...remoteMaps])].sort();
+  const paths = [...new Set([...vfs.list('maps/', '.bsp'), ...remoteMaps])].sort();
+  // Les noms se lisent dans les cartes elles-mêmes, quand elles sont montées.
+  const maps = buildCatalog(vfs, paths);
   overlay.setHudVisible(false);
   overlay.showMenu(maps, {
     onDemo: () => void startLevel(() => loadDemoLevel(session.options), 'arène de démonstration'),
     onMap: (path) =>
       void startLevel(async () => {
         if (!vfs.read(path)) await fetchRemoteMap(path);
-        return loadBspLevel(vfs, path, session.options, entityModels, audio);
+        return loadBspLevel(vfs, path, session.options, entityModels, audio, (value, step) =>
+          overlay.setProgress(value, step),
+        );
       }, path),
     onFiles: (files) => void addFiles(files),
     onGraphics: () => showGraphicsPanel(note),
@@ -236,7 +241,7 @@ function showGraphicsPanel(note?: string): void {
 }
 
 async function addFiles(files: FileList): Promise<void> {
-  overlay.showLoading('Lecture des fichiers');
+  overlay.showLoading('Lecture des fichiers', `${files.length} fichier(s)`);
   const added: string[] = [];
   let index = 0;
 
@@ -273,17 +278,19 @@ async function startLevel(factory: () => Level | Promise<Level>, label: string):
   // Le lancement part d'un clic : c'est le moment où le navigateur autorise
   // enfin la sortie audio, et donc où le décodage peut commencer.
   audio.resume();
-  overlay.showLoading(label);
-  overlay.setProgress(0.15, 'Analyse de la géométrie');
+
+  // Le nom annoncé pendant le chargement est celui que la carte déclare.
+  const code = label.replace(/^.*\//, '').replace(/\.bsp$/i, '');
+  const title = label.endsWith('.bsp') ? readMapTitle(vfs, label) ?? code : label;
+  overlay.showLoading(title, code);
+  overlay.setProgress(0.08, 'Lecture du fichier');
   await yieldToBrowser();
 
   try {
     const started = performance.now();
-    overlay.setProgress(0.45, 'Construction des surfaces et des lightmaps');
-    await yieldToBrowser();
 
     const level = await factory();
-    overlay.setProgress(0.9, 'Préparation du rendu');
+    overlay.setProgress(0.92, 'Préparation du rendu');
     await yieldToBrowser();
 
     session.setLevel(level);
@@ -365,7 +372,7 @@ window.addEventListener('keydown', (event) => {
 });
 
 void (async () => {
-  overlay.showLoading('Recherche des données locales');
+  overlay.showLoading('Quake HD', 'démarrage');
   const manifest = await readManifest();
   remoteMaps = manifest.maps ?? [];
   // Bibliothèque de matériaux haute définition : son absence est le cas normal,

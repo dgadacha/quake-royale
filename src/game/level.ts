@@ -201,15 +201,26 @@ function lightsFromEntities(entities: BspEntity[]): PointLight[] {
   return lights;
 }
 
-export function loadBspLevel(
+/** Rend la main au navigateur, pour qu'il puisse redessiner l'écran. */
+const breathe = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+export async function loadBspLevel(
   vfs: VirtualFileSystem,
   path: string,
   options: WorldOptions,
   entityModels: EntityModelMap = {},
   audio: AudioEngine | null = null,
-): Level {
+  onProgress: (value: number, step: string) => void = () => {},
+): Promise<Level> {
+  // Les étapes rendent la main entre elles : sans cela le navigateur ne
+  // redessine rien et la progression resterait figée jusqu'à la fin.
+  onProgress(0.1, 'Lecture du fichier');
+  await breathe();
   const data = vfs.readOrThrow(path);
   const bsp = parseBsp(data);
+
+  onProgress(0.25, 'Construction des surfaces');
+  await breathe();
 
   // Sans palette, les index des textures ne peuvent pas être convertis en
   // couleurs justes : le rendu reste lisible mais les teintes sont inventées.
@@ -218,6 +229,9 @@ export function loadBspLevel(
   const paletteMissing = !paletteData;
 
   const world = buildWorld(bsp, palette, options);
+
+  onProgress(0.7, 'Volumes de collision');
+  await breathe();
   const collision = new BspCollision(bsp);
   const spawn = findSpawn(bsp.entities);
 
@@ -291,6 +305,9 @@ export function loadBspLevel(
     return modelCache.get(path) ?? null;
   };
 
+  onProgress(0.82, 'Occupants du niveau');
+  await breathe();
+
   const enemyRenderer = new EnemyRenderer(enemies, loadEnemyModel, palette, {
     anisotropy: options.anisotropy,
     ambient: options.ambient,
@@ -304,6 +321,8 @@ export function loadBspLevel(
   const decals = new DecalPool();
   const particles = new ImpactParticles();
 
+  onProgress(0.93, 'Portes et mécanismes');
+  await breathe();
   const movers = collectMovers(bsp);
   const moverManager = new MoverManager(movers, {
     onOpen: (mover) => {

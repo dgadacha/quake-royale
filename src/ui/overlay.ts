@@ -1,3 +1,25 @@
+import type { MapEntry } from '../game/mapCatalog';
+import { groupCatalog } from '../game/mapCatalog';
+
+export interface MenuHandlers {
+  onDemo(): void;
+  onMap(path: string): void;
+  onFiles(files: FileList): void;
+  onGraphics(): void;
+}
+
+export interface GraphicsRow {
+  key: string;
+  label: string;
+  hint?: string;
+  kind: 'toggle' | 'range' | 'choice';
+  value: boolean | number | string;
+  min?: number;
+  max?: number;
+  step?: number;
+  choices?: { value: string; label: string }[];
+}
+
 const LAST_MAP_KEY = 'quake-hd.lastMap';
 
 function readLastMap(): string | null {
@@ -16,54 +38,7 @@ function writeLastMap(path: string): void {
   }
 }
 
-/** Nom de fichier sans son dossier ni son extension. */
-function shortMapName(path: string): string {
-  return path.replace(/^.*\//, '').replace(/\.bsp$/i, '');
-}
-
-/**
- * Regroupe les cartes par épisode d'après la convention de nommage des
- * fichiers. Une centaine de cartes en une seule grille serait illisible.
- */
-function groupMaps(maps: string[]): [string, string[]][] {
-  const groups = new Map<string, string[]>();
-  for (const map of maps) {
-    const name = shortMapName(map).toLowerCase();
-    const episode = /^e(\d)m\d/.exec(name);
-    const key = episode ? `Épisode ${episode[1]}` : 'Autres';
-    const list = groups.get(key) ?? [];
-    list.push(map);
-    groups.set(key, list);
-  }
-
-  return [...groups.entries()].sort(([a], [b]) => {
-    if (a === 'Autres') return 1;
-    if (b === 'Autres') return -1;
-    return a.localeCompare(b, 'fr');
-  });
-}
-
-export interface MenuHandlers {
-  onDemo(): void;
-  onMap(path: string): void;
-  onFiles(files: FileList): void;
-  onGraphics(): void;
-}
-
-export interface GraphicsRow {
-  key: string;
-  label: string;
-  hint?: string;
-  kind: 'toggle' | 'range' | 'choice';
-  value: boolean | number | string;
-  min?: number;
-  max?: number;
-  step?: number;
-  /** Options d'un réglage à choix, par exemple les préréglages de qualité. */
-  choices?: { value: string; label: string }[];
-}
-
-/** Écrans d'accueil, de chargement et affichage de jeu. */
+/** Écrans d'accueil, de chargement, de réglages, et affichage en jeu. */
 export class Overlay {
   private readonly root: HTMLElement;
   private readonly hud: HTMLElement;
@@ -71,6 +46,8 @@ export class Overlay {
   private readonly hint: HTMLElement;
   private screen: HTMLElement | null = null;
   private progressBar: HTMLElement | null = null;
+  private progressStep: HTMLElement | null = null;
+  private progressValue: HTMLElement | null = null;
   private status: HTMLElement | null = null;
 
   constructor(container: HTMLElement) {
@@ -97,46 +74,109 @@ export class Overlay {
     return screen;
   }
 
-  showMenu(maps: string[], handlers: MenuHandlers, note?: string): void {
+  showMenu(catalog: MapEntry[], handlers: MenuHandlers, note?: string): void {
     const screen = this.newScreen();
     const panel = document.createElement('div');
     panel.className = 'panel';
     panel.innerHTML = `
-      <h1>Quake HD</h1>
-      <p class="subtitle">
+      <h1 class="title">Quake HD</h1>
+      <p class="tagline">
         Moteur de rendu haute définition écrit en TypeScript et Three.js.
-        Les cartes, textures et sons ne sont pas fournis : montez vos propres
-        fichiers de données pour jouer vos niveaux.
+        Les cartes, textures, modèles et sons proviennent de votre propre copie
+        du jeu : rien n'est fourni ici.
       </p>
-      <h2>Sans données</h2>
-      <button class="primary" data-action="demo">
-        Arène de démonstration
-        <span class="hint">Niveau généré par le code, éclairage cuit, eau et escaliers</span>
-      </button>
-      <h2>Image</h2>
-      <button data-action="graphics">
-        Paramètres graphiques
-        <span class="hint">Occlusion ambiante, réflexions, halo lumineux, grain</span>
-      </button>
-      <h2>Vos données</h2>
-      <div class="drop" data-action="drop">
-        Déposez ici un fichier <b>.pak</b> ou une carte <b>.bsp</b><br />
-        ou cliquez pour parcourir
-      </div>
-      <div class="maps"></div>
-      <div class="status">${note ?? ''}</div>
-      <div class="keys">
-        <kbd>ZQSD</kbd> / <kbd>WASD</kbd> déplacement · <kbd>Maj</kbd> courir ·
-        <kbd>Espace</kbd> sauter · <kbd>Échap</kbd> menu
-      </div>
+      <div class="rule"></div>
     `;
     screen.append(panel);
-    this.status = panel.querySelector('.status');
 
-    panel.querySelector('[data-action="demo"]')?.addEventListener('click', handlers.onDemo);
-    panel.querySelector('[data-action="graphics"]')?.addEventListener('click', handlers.onGraphics);
+    const section = (label: string) => {
+      const heading = document.createElement('h2');
+      heading.textContent = label;
+      panel.append(heading);
+    };
 
-    const drop = panel.querySelector('[data-action="drop"]') as HTMLElement;
+    if (catalog.length > 0) {
+      section(`Niveaux — ${catalog.length}`);
+
+      const search = document.createElement('input');
+      search.type = 'search';
+      search.className = 'map-filter';
+      search.placeholder = 'Filtrer par nom ou par code';
+      const list = document.createElement('div');
+
+      let filter = '';
+      const last = readLastMap();
+
+      const draw = () => {
+        list.innerHTML = '';
+        const kept = catalog.filter((entry) => {
+          if (!filter) return true;
+          const haystack = `${entry.code} ${entry.title ?? ''}`.toLowerCase();
+          return haystack.includes(filter);
+        });
+
+        for (const group of groupCatalog(kept)) {
+          const block = document.createElement('div');
+          block.className = 'episode';
+
+          const name = document.createElement('div');
+          name.className = 'episode-name';
+          name.textContent = group.episode;
+          block.append(name);
+
+          const grid = document.createElement('div');
+          grid.className = 'level-grid';
+          for (const entry of group.maps) {
+            const button = document.createElement('button');
+            button.className = 'level';
+            if (entry.path === last) button.dataset.last = 'true';
+            // Le nom vient de la carte ; à défaut, son code fait office de nom.
+            button.innerHTML =
+              `<span class="code">${entry.code}</span>` +
+              `<span class="name">${entry.title ?? '—'}</span>`;
+            button.addEventListener('click', () => {
+              writeLastMap(entry.path);
+              handlers.onMap(entry.path);
+            });
+            grid.append(button);
+          }
+          block.append(grid);
+          list.append(block);
+        }
+
+        if (kept.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'status';
+          empty.textContent = 'Aucun niveau ne correspond.';
+          list.append(empty);
+        }
+      };
+
+      search.addEventListener('input', () => {
+        filter = search.value.trim().toLowerCase();
+        draw();
+      });
+
+      if (catalog.length > 14) panel.append(search);
+      panel.append(list);
+      draw();
+    }
+
+    section('Sans données');
+    const demo = document.createElement('button');
+    demo.className = 'primary';
+    demo.innerHTML =
+      'Arène de démonstration<span class="hint">Niveau produit par le code : éclairage cuit, eau, escaliers</span>';
+    demo.addEventListener('click', handlers.onDemo);
+    panel.append(demo);
+
+    section('Vos données');
+    const drop = document.createElement('div');
+    drop.className = 'drop';
+    drop.innerHTML =
+      'Déposez ici une archive <b>.pak</b> ou une carte <b>.bsp</b><br />ou cliquez pour parcourir';
+    panel.append(drop);
+
     const picker = document.createElement('input');
     picker.type = 'file';
     picker.accept = '.pak,.bsp,.lmp,.wad';
@@ -167,74 +207,58 @@ export class Overlay {
       if (event.dataTransfer?.files.length) handlers.onFiles(event.dataTransfer.files);
     });
 
-    const mapList = panel.querySelector('.maps') as HTMLElement;
-    this.renderMaps(mapList, maps, handlers.onMap);
+    section('Image');
+    const graphics = document.createElement('button');
+    graphics.innerHTML =
+      'Paramètres graphiques<span class="hint">Qualité, occlusion, réflexions, ombres, halo, sources dynamiques</span>';
+    graphics.addEventListener('click', handlers.onGraphics);
+    panel.append(graphics);
+
+    const statusLine = document.createElement('div');
+    statusLine.className = 'status';
+    statusLine.textContent = note ?? '';
+    panel.append(statusLine);
+    this.status = statusLine;
+
+    const keys = document.createElement('div');
+    keys.className = 'keys';
+    keys.innerHTML =
+      '<kbd>Z Q S D</kbd> se déplacer · <kbd>Maj</kbd> courir · <kbd>Espace</kbd> sauter · ' +
+      '<kbd>Clic</kbd> tirer · <kbd>F3</kbd> compteurs · <kbd>Échap</kbd> menu';
+    panel.append(keys);
   }
 
-  private renderMaps(container: HTMLElement, maps: string[], onMap: (path: string) => void): void {
-    container.innerHTML = '';
-    if (maps.length === 0) return;
-
-    const heading = document.createElement('h2');
-    heading.textContent = `Cartes détectées (${maps.length})`;
-    container.before(heading);
-
-    // Un filtre n'a d'intérêt qu'à partir d'un certain nombre de cartes.
-    let filter = '';
-    if (maps.length > 12) {
-      const search = document.createElement('input');
-      search.type = 'search';
-      search.placeholder = 'Filtrer';
-      search.className = 'map-filter';
-      search.addEventListener('input', () => {
-        filter = search.value.trim().toLowerCase();
-        draw();
-      });
-      container.before(search);
-    }
-
-    const last = readLastMap();
-
-    const draw = () => {
-      container.innerHTML = '';
-      const kept = maps.filter((map) => !filter || map.toLowerCase().includes(filter));
-
-      for (const [group, entries] of groupMaps(kept)) {
-        const label = document.createElement('div');
-        label.className = 'map-group';
-        label.textContent = group;
-        container.append(label);
-
-        const row = document.createElement('div');
-        row.className = 'map-row';
-        for (const map of entries) {
-          const button = document.createElement('button');
-          button.textContent = shortMapName(map);
-          if (map === last) {
-            button.dataset.last = 'true';
-            button.title = 'Dernière carte lancée';
-          }
-          button.addEventListener('click', () => {
-            writeLastMap(map);
-            onMap(map);
-          });
-          row.append(button);
-        }
-        container.append(row);
-      }
-
-      if (kept.length === 0) {
-        const empty = document.createElement('div');
-        empty.className = 'status';
-        empty.textContent = 'Aucune carte ne correspond.';
-        container.append(empty);
-      }
-    };
-
-    draw();
+  /** Écran de chargement, avec le nom du niveau et l'étape en cours. */
+  showLoading(title: string, code: string): void {
+    const screen = this.newScreen();
+    const panel = document.createElement('div');
+    panel.className = 'panel loading';
+    panel.innerHTML = `
+      <h2 class="level-title">${title}</h2>
+      <div class="level-code">${code}</div>
+      <div class="progress"><div></div></div>
+      <div class="step"><span class="label">Préparation</span><span class="value">0 %</span></div>
+    `;
+    screen.append(panel);
+    this.progressBar = panel.querySelector('.progress > div');
+    this.progressStep = panel.querySelector('.step .label');
+    this.progressValue = panel.querySelector('.step .value');
+    this.status = null;
   }
 
-  /** Panneau de réglages d'image, appliqués immédiatement. */
+  setProgress(value: number, step?: string): void {
+    const clamped = Math.max(0, Math.min(1, value));
+    if (this.progressBar) this.progressBar.style.width = `${Math.round(clamped * 100)}%`;
+    if (this.progressValue) this.progressValue.textContent = `${Math.round(clamped * 100)} %`;
+    if (step && this.progressStep) this.progressStep.textContent = step;
+  }
+
+  setStatus(text: string, isError = false): void {
+    if (!this.status) return;
+    this.status.textContent = text;
+    this.status.classList.toggle('error', isError);
+  }
+
   showGraphics(
     rows: GraphicsRow[],
     onChange: (key: string, value: boolean | number | string) => void,
@@ -244,11 +268,12 @@ export class Overlay {
     const panel = document.createElement('div');
     panel.className = 'panel';
     panel.innerHTML = `
-      <h1>Image</h1>
-      <p class="subtitle">
-        Les réglages s'appliquent tout de suite et sont conservés pour les
+      <h1 class="title" style="font-size:clamp(22px,3.4vw,34px)">Image</h1>
+      <p class="tagline">
+        Les réglages s'appliquent immédiatement et sont conservés pour les
         prochaines sessions.
       </p>
+      <div class="rule"></div>
     `;
 
     for (const row of rows) {
@@ -274,7 +299,7 @@ export class Overlay {
               sibling.dataset.on = 'false';
             }
             button.dataset.on = 'true';
-            onChange(row.key, choice.value as never);
+            onChange(row.key, choice.value);
           });
           control.append(button);
         }
@@ -318,36 +343,10 @@ export class Overlay {
 
     const back = document.createElement('button');
     back.textContent = 'Retour';
-    back.style.marginTop = '20px';
+    back.style.marginTop = '22px';
     back.addEventListener('click', onBack);
     panel.append(back);
     screen.append(panel);
-  }
-
-  showLoading(label: string): void {
-    const screen = this.newScreen();
-    const panel = document.createElement('div');
-    panel.className = 'panel';
-    panel.innerHTML = `
-      <h1>Chargement</h1>
-      <p class="subtitle">${label}</p>
-      <div class="progress"><div></div></div>
-      <div class="status"></div>
-    `;
-    screen.append(panel);
-    this.progressBar = panel.querySelector('.progress > div');
-    this.status = panel.querySelector('.status');
-  }
-
-  setProgress(value: number, label?: string): void {
-    if (this.progressBar) this.progressBar.style.width = `${Math.round(value * 100)}%`;
-    if (label && this.status) this.status.textContent = label;
-  }
-
-  setStatus(text: string, isError = false): void {
-    if (!this.status) return;
-    this.status.textContent = text;
-    this.status.classList.toggle('error', isError);
   }
 
   showError(message: string, onBack: () => void): void {
@@ -355,8 +354,9 @@ export class Overlay {
     const panel = document.createElement('div');
     panel.className = 'panel';
     panel.innerHTML = `
-      <h1>Erreur</h1>
-      <p class="subtitle error">${message}</p>
+      <h1 class="title" style="font-size:clamp(22px,3.4vw,34px)">Échec</h1>
+      <p class="tagline error">${message}</p>
+      <div class="rule"></div>
     `;
     const button = document.createElement('button');
     button.textContent = 'Retour';
@@ -369,6 +369,8 @@ export class Overlay {
     this.screen?.remove();
     this.screen = null;
     this.progressBar = null;
+    this.progressStep = null;
+    this.progressValue = null;
     this.status = null;
   }
 
