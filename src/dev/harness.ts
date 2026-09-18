@@ -134,6 +134,16 @@ export function installHarness(session: Session): void {
       return session.shadows.inspect(session.renderer);
     },
 
+    /** État de la sortie audio ; l'appel la démarre si besoin. */
+    audio(volume?: number) {
+      const engine = (window as unknown as { __audio?: import('../audio/AudioEngine').AudioEngine })
+        .__audio;
+      if (!engine) return null;
+      engine.resume();
+      if (volume !== undefined) engine.setVolume(volume);
+      return { actif: engine.isRunning, sonsCharges: engine.loadedCount, actifs: engine.isEnabled };
+    },
+
     /** Marques et éclats actuellement en vie. */
     effects() {
       return session.currentLevel?.effectsInfo() ?? null;

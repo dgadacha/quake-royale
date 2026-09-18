@@ -11,6 +11,8 @@ import { buildFaceLeafIndex, VisibilitySet } from '../render/pvs';
 import { DecalPool } from '../render/decals';
 import { ImpactParticles } from '../render/impactParticles';
 import { surfaceAt } from './entities/SurfaceProbe';
+import type { AudioEngine } from '../audio/AudioEngine';
+import { creatureSounds, pick, soundTable, type CreatureEvent } from '../audio/soundTable';
 import { collectEnemies, enemyModels } from './entities/Enemy';
 import { parseMdl, type MdlModel } from '../formats/mdl';
 import { EnemyManager } from './entities/EnemyManager';
@@ -204,6 +206,7 @@ export function loadBspLevel(
   path: string,
   options: WorldOptions,
   entityModels: EntityModelMap = {},
+  audio: AudioEngine | null = null,
 ): Level {
   const data = vfs.readOrThrow(path);
   const bsp = parseBsp(data);
@@ -236,13 +239,39 @@ export function loadBspLevel(
   // vient du jeu.
   const enemies = collectEnemies(bsp);
   let pendingDamage = 0;
+
+  /** Position d'une source sonore, dans le repère de rendu. */
+  const soundAt = (origin: Vec3) =>
+    new THREE.Vector3(...quakeToThree(origin[0], origin[1], origin[2]));
+
+  /** Premier fichier réellement présent parmi les candidats proposés. */
+  const firstAvailable = (candidates: string[]): string | null => {
+    for (const candidate of candidates) {
+      if (vfs.read(candidate)) return candidate;
+    }
+    return null;
+  };
+
+  const playCreature = (classname: string, event: CreatureEvent, origin: Vec3) => {
+    if (!audio) return;
+    const file = firstAvailable(creatureSounds(classname, event));
+    if (file) audio.play(file, { position: soundAt(origin), volume: 0.9, range: 2600 });
+  };
   const enemyManager = new EnemyManager(
     enemies,
     {
       collision: collision.world(0),
       isVisible: (from, to) => collision.world(0, HULL_POINT).trace(from, to).fraction >= 0.999,
     },
-    { onPlayerHit: (damage) => { pendingDamage += damage; } },
+    {
+      onPlayerHit: (damage) => {
+        pendingDamage += damage;
+      },
+      onSight: (enemy) => playCreature(enemy.classname, 'sight', enemy.origin),
+      onAttack: (enemy) => playCreature(enemy.classname, 'attack', enemy.origin),
+      onPain: (enemy) => playCreature(enemy.classname, 'pain', enemy.origin),
+      onDeath: (enemy) => playCreature(enemy.classname, 'death', enemy.origin),
+    },
   );
   // Modèles des créatures, lus dans les données montées. Chaque fichier n'est
   // analysé qu'une fois, même s'il sert à trente occupants.
@@ -276,7 +305,30 @@ export function loadBspLevel(
   const particles = new ImpactParticles();
 
   const movers = collectMovers(bsp);
-  const moverManager = new MoverManager(movers);
+  const moverManager = new MoverManager(movers, {
+    onOpen: (mover) => {
+      if (!audio) return;
+      const list = mover.kind === 'plat' ? soundTable.platMove : soundTable.doorOpen;
+      const file = firstAvailable([...list]);
+      const center: Vec3 = [
+        (mover.mins[0] + mover.maxs[0]) / 2,
+        (mover.mins[1] + mover.maxs[1]) / 2,
+        (mover.mins[2] + mover.maxs[2]) / 2,
+      ];
+      if (file) audio.play(file, { position: soundAt(center), volume: 0.75, range: 2000 });
+    },
+    onClose: (mover) => {
+      if (!audio) return;
+      const list = mover.kind === 'plat' ? soundTable.platStop : soundTable.doorClose;
+      const file = firstAvailable([...list]);
+      const center: Vec3 = [
+        (mover.mins[0] + mover.maxs[0]) / 2,
+        (mover.mins[1] + mover.maxs[1]) / 2,
+        (mover.mins[2] + mover.maxs[2]) / 2,
+      ];
+      if (file) audio.play(file, { position: soundAt(center), volume: 0.7, range: 2000 });
+    },
+  });
   const playerCollision = movers.length
     ? new MoverCollision(collision.world(0), collision, movers)
     : collision.world(0);
@@ -347,14 +399,30 @@ export function loadBspLevel(
         ...quakeToThree(result.normal[0], result.normal[1], result.normal[2]),
       ).normalize();
 
+      const impactSurface = result.enemy
+        ? 'flesh'
+        : surfaceAt(bsp, visibility, result.point, result.normal);
+
       if (result.enemy) {
         // Une créature ne garde pas de marque : seuls les éclats la signalent.
         particles.burst(point, normal, 'flesh');
       } else {
-        const surface = surfaceAt(bsp, visibility, result.point, result.normal);
         // Un liquide avale la marque, il n'en reste que la gerbe.
-        if (surface !== 'liquid') decals.add(point, normal, 5.5);
-        particles.burst(point, normal, surface);
+        if (impactSurface !== 'liquid') decals.add(point, normal, 5.5);
+        particles.burst(point, normal, impactSurface);
+      }
+
+      if (audio) {
+        const file = pick(soundTable.impact[impactSurface]);
+        if (file) {
+          // La hauteur varie légèrement : des impacts identiques s'entendent.
+          audio.play(file, {
+            position: point,
+            volume: 0.55,
+            rate: 0.9 + Math.random() * 0.25,
+            range: 1800,
+          });
+        }
       }
 
       return { point: result.point, hit: result.enemy !== null, killed: result.killed };

@@ -12,6 +12,11 @@ export interface EnemyWorld {
 
 export interface EnemyEvents {
   onPlayerHit(damage: number, from: Vec3): void;
+  /** Transitions notables, pour les accompagner d'un son. */
+  onSight?(enemy: Enemy): void;
+  onAttack?(enemy: Enemy): void;
+  onPain?(enemy: Enemy): void;
+  onDeath?(enemy: Enemy): void;
 }
 
 /**
@@ -48,8 +53,10 @@ export class EnemyManager {
     if (enemy.health <= 0) {
       enemy.state = 'dying';
       enemy.deathProgress = 0;
+      this.events.onDeath?.(enemy);
       return true;
     }
+    this.events.onPain?.(enemy);
     return false;
   }
 
@@ -78,7 +85,11 @@ export class EnemyManager {
 
       switch (enemy.state) {
         case 'dormant':
-          if (sees) enemy.state = 'alerted';
+          if (sees) {
+            enemy.state = 'alerted';
+            // Le cri d'éveil est la seule alerte quand la créature est hors champ.
+            this.events.onSight?.(enemy);
+          }
           break;
 
         case 'alerted':
@@ -110,6 +121,7 @@ export class EnemyManager {
           this.faceTarget(enemy, target);
           if (enemy.sinceAttack >= enemy.profile.attackDelay) {
             enemy.sinceAttack = 0;
+            this.events.onAttack?.(enemy);
             this.events.onPlayerHit(enemy.profile.damage, enemy.origin);
           }
           break;

@@ -5,6 +5,8 @@ import { Overlay, type GraphicsRow } from './ui/overlay';
 import { applyPreset, type QualityPreset } from './render/graphics';
 import { installHarness } from './dev/harness';
 import { loadEntityMapping, type EntityModelMap } from './game/entityModels';
+import { AudioEngine } from './audio/AudioEngine';
+import { allSoundPaths } from './audio/soundTable';
 
 const canvas = document.getElementById('viewport') as HTMLCanvasElement;
 const overlayRoot = document.getElementById('overlay') as HTMLElement;
@@ -12,6 +14,10 @@ const overlayRoot = document.getElementById('overlay') as HTMLElement;
 const session = new Session(canvas);
 const overlay = new Overlay(overlayRoot);
 const vfs = new VirtualFileSystem();
+const audio = new AudioEngine(vfs);
+session.setAudio(audio);
+// Rendu accessible au harnais de mise au point.
+(window as unknown as Record<string, unknown>).__audio = audio;
 
 let statsVisible = true;
 if (new URLSearchParams(location.search).has('dev')) installHarness(session);
@@ -86,7 +92,7 @@ function refreshMenu(note?: string): void {
     onMap: (path) =>
       void startLevel(async () => {
         if (!vfs.read(path)) await fetchRemoteMap(path);
-        return loadBspLevel(vfs, path, session.options, entityModels);
+        return loadBspLevel(vfs, path, session.options, entityModels, audio);
       }, path),
     onFiles: (files) => void addFiles(files),
     onGraphics: () => showGraphicsPanel(note),
@@ -264,6 +270,9 @@ async function addFiles(files: FileList): Promise<void> {
 }
 
 async function startLevel(factory: () => Level | Promise<Level>, label: string): Promise<void> {
+  // Le lancement part d'un clic : c'est le moment où le navigateur autorise
+  // enfin la sortie audio, et donc où le décodage peut commencer.
+  audio.resume();
   overlay.showLoading(label);
   overlay.setProgress(0.15, 'Analyse de la géométrie');
   await yieldToBrowser();
@@ -279,6 +288,15 @@ async function startLevel(factory: () => Level | Promise<Level>, label: string):
 
     session.setLevel(level);
     session.start();
+
+    // Les sons de la carte sont décodés à l'avance : le premier tir ne doit
+    // pas être muet le temps du chargement.
+    const classnames = level.entities
+      .map((entity) => entity.classname)
+      .filter((name) => name.startsWith('monster_'));
+    void audio.preload(allSoundPaths(classnames)).then((count) => {
+      if (count > 0) console.info(`[quake-hd] sons chargés : ${count}`);
+    });
     overlay.hide();
     overlay.setHudVisible(true);
     overlay.setHint(
@@ -323,6 +341,8 @@ session.setStatsListener((stats) => {
 });
 
 canvas.addEventListener('click', () => {
+  // Un navigateur n'autorise le son qu'après une action de l'utilisateur.
+  audio.resume();
   if (session.currentLevel && !session.input.locked) session.input.requestLock();
 });
 

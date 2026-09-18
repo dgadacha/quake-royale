@@ -5,6 +5,8 @@ import { loadGraphics, saveGraphics, type GraphicsSettings } from '../render/gra
 import { HDMaterialManager } from '../hd/materials/HDMaterialManager';
 import { HDLightManager } from '../hd/lights/HDLightManager';
 import { ShadowMapper } from '../render/shadows';
+import type { AudioEngine } from '../audio/AudioEngine';
+import { pick, soundTable } from '../audio/soundTable';
 import { Viewmodel } from '../render/viewmodel';
 import shotgunUrl from '../../assets/shotgun.glb?url';
 import { defaultWorldOptions, quakeToThree, type WorldOptions } from '../render/world';
@@ -49,6 +51,11 @@ export class Session {
   private muzzleGlow = 0;
   /** Compte à rebours avant réapparition. */
   private deathTimer = 0;
+  private audio: AudioEngine | null = null;
+  /** État précédent, pour ne déclencher un son qu'au moment du changement. */
+  private wasOnGround = true;
+  private wasInWater = false;
+  private lastFallSpeed = 0;
   private readonly lampColor = new THREE.Color();
   private readonly muzzleColor = new THREE.Color(1.5, 1.1, 0.62);
   // Objets réutilisés à chaque image, pour ne rien allouer dans la boucle.
@@ -106,6 +113,15 @@ export class Session {
 
   setStatsListener(listener: (stats: SessionStats) => void): void {
     this.onStats = listener;
+  }
+
+  setAudio(audio: AudioEngine): void {
+    this.audio = audio;
+  }
+
+  private playSound(list: readonly string[], volume = 1): void {
+    const file = pick(list);
+    if (file) this.audio?.play(file, { volume });
   }
 
   get graphicsSettings(): GraphicsSettings {
@@ -197,6 +213,7 @@ export class Session {
       const damage = this.level.updateEnemies(delta, this.player.position);
       if (damage > 0 && this.player.health > 0) {
         const died = this.player.hurt(damage);
+        this.playSound(died ? soundTable.playerDeath : soundTable.playerPain, 0.85);
         if (died) this.deathTimer = 2.2;
       }
       if (this.deathTimer > 0) {
@@ -258,6 +275,27 @@ export class Session {
           : this.player.waterType === Contents.SLIME
             ? new THREE.Color(0.6, 1.2, 0.5)
             : new THREE.Color(0.45, 0.75, 1.1);
+      // Les sons d'état ne se déclenchent qu'au passage d'une limite.
+      const onGround = this.player.state.onGround;
+      if (onGround && !this.wasOnGround && this.lastFallSpeed < -260) {
+        this.playSound(soundTable.playerLand, 0.6);
+      }
+      if (!onGround && this.wasOnGround && this.player.state.velocity[2] > 200) {
+        this.playSound(soundTable.playerJump, 0.45);
+      }
+      this.lastFallSpeed = this.player.state.velocity[2];
+      this.wasOnGround = onGround;
+
+      const inWater = this.player.state.waterLevel >= 2;
+      if (inWater !== this.wasInWater) {
+        this.playSound(
+          inWater ? soundTable.playerEnterWater : soundTable.playerLeaveWater,
+          0.6,
+        );
+        this.wasInWater = inWater;
+      }
+
+      this.audio?.updateListener(this.camera);
       this.post.setUnderwater(this.underwaterAmount, tint);
       // Rouge à l'écran : dégâts encaissés, bain de lave, ou mort en cours.
       const hurtFlash = Math.max(0, 0.55 - this.player.sinceHurt * 1.6);
@@ -268,6 +306,7 @@ export class Session {
       if (this.player.consumeAttack() && this.player.health > 0) {
         this.viewmodel.fire();
         this.muzzleGlow = 1;
+        this.playSound(soundTable.weaponFire, 0.7);
         // Le tir part de l'oeil et suit la visée, pas le canon : c'est ce que
         // le joueur vise qui doit être touché.
         this.level.fire(this.player.eyeOrigin, this.player.aimDirection, 24);

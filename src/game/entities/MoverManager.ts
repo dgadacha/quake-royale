@@ -11,8 +11,16 @@ const APPROACH_RANGE = 64;
  * monte tant que le joueur est dessus ou à proximité et redescend ensuite.
  * Les portes nommées attendent un déclencheur et ne réagissent pas seules.
  */
+export interface MoverEvents {
+  onOpen?(mover: Mover): void;
+  onClose?(mover: Mover): void;
+}
+
 export class MoverManager {
-  constructor(readonly movers: Mover[]) {}
+  constructor(
+    readonly movers: Mover[],
+    private readonly events: MoverEvents = {},
+  ) {}
 
   /** Ouvre par son nom, pour les portes commandées par un bouton. */
   trigger(name: string): void {
@@ -25,6 +33,7 @@ export class MoverManager {
     if (mover.state === 'open' || mover.state === 'opening') return;
     mover.state = 'opening';
     mover.waited = 0;
+    this.events.onOpen?.(mover);
   }
 
   update(deltaTime: number, playerPosition: Vec3): void {
@@ -54,6 +63,7 @@ export class MoverManager {
           // Une attente négative signale un volume qui reste ouvert.
           if (mover.wait >= 0 && mover.waited >= mover.wait && !near) {
             mover.state = 'closing';
+            this.events.onClose?.(mover);
           }
           break;
 
