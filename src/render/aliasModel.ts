@@ -80,6 +80,77 @@ export interface AliasModelOptions {
 }
 
 /**
+ * Images et peau d'un modèle, partagées par tous ceux qui l'emploient.
+ *
+ * Une carte peut compter quarante adversaires du même type. Leur recalculer à
+ * chacun les mêmes images clés revient à garder quarante copies d'un même
+ * tableau, ce que la subdivision rend intenable : elles ne diffèrent que par
+ * l'instant où chacun en est.
+ */
+interface SharedAlias {
+  frameBuffers: Float32Array[];
+  uvs: Float32Array;
+  textureSet: TextureSet;
+  users: number;
+}
+
+const sharedByModel = new WeakMap<MdlModel, SharedAlias>();
+
+function shareOf(model: MdlModel, palette: Palette, options: AliasModelOptions): SharedAlias {
+  const existing = sharedByModel.get(model);
+  if (existing) {
+    existing.users++;
+    return existing;
+  }
+
+  const cornerCount = model.triangles.length * 3;
+  const sourceIndices = new Int32Array(cornerCount);
+  const uvs = new Float32Array(cornerCount * 2);
+
+  let corner = 0;
+  for (const triangle of model.triangles) {
+    for (const vertexIndex of triangle.vertices) {
+      const coord = model.texCoords[vertexIndex];
+      let s = coord.s;
+      // Les sommets de couture occupent la moitié droite de la peau
+      // lorsqu'ils appartiennent à une face arrière.
+      if (coord.onSeam && !triangle.facesFront) s += model.skinWidth / 2;
+      uvs[corner * 2] = (s + 0.5) / model.skinWidth;
+      uvs[corner * 2 + 1] = (coord.t + 0.5) / model.skinHeight;
+      sourceIndices[corner] = vertexIndex;
+      corner++;
+    }
+  }
+
+  const frameBuffers = model.frames.map((frame) => {
+    const positions = new Float32Array(cornerCount * 3);
+    for (let i = 0; i < cornerCount; i++) {
+      const source = sourceIndices[i] * 3;
+      // Passage du repère du jeu à celui du moteur de rendu.
+      positions[i * 3] = frame.positions[source];
+      positions[i * 3 + 1] = frame.positions[source + 2];
+      positions[i * 3 + 2] = -frame.positions[source + 1];
+    }
+    return positions;
+  });
+
+  const skin = model.skins[0];
+  const textureSet = buildTextureSet(
+    skin
+      ? { name: 'skin', width: skin.width, height: skin.height, pixels: skin.pixels }
+      : { name: 'skin', width: 16, height: 16, pixels: null },
+    palette,
+    { anisotropy: options.anisotropy, maxUpscale: 2, normalStrength: 1.4 },
+  );
+  textureSet.map.wrapS = THREE.ClampToEdgeWrapping;
+  textureSet.map.wrapT = THREE.ClampToEdgeWrapping;
+
+  const share: SharedAlias = { frameBuffers, uvs, textureSet, users: 1 };
+  sharedByModel.set(model, share);
+  return share;
+}
+
+/**
  * Affichage d'un modèle animé. Les images clés sont conservées côté carte
  * graphique et mélangées par le shader, ce qui permet d'animer des dizaines
  * de modèles sans travail par sommet côté processeur.
@@ -91,43 +162,25 @@ export class AliasModel {
   private readonly geometry: THREE.BufferGeometry;
   private readonly frameBuffers: Float32Array[];
   private readonly textureSet: TextureSet;
-  /** Un sommet de rendu par coin de triangle : les coutures dupliquent les UV. */
-  private readonly sourceIndices: Int32Array;
+  private readonly model: MdlModel;
   private currentFrame = -1;
   private nextFrame = -1;
 
-  constructor(model: MdlModel, palette: Palette, options: AliasModelOptions) {
-    const cornerCount = model.triangles.length * 3;
-    this.sourceIndices = new Int32Array(cornerCount);
-    const uvs = new Float32Array(cornerCount * 2);
-
-    let corner = 0;
-    for (const triangle of model.triangles) {
-      for (const vertexIndex of triangle.vertices) {
-        const coord = model.texCoords[vertexIndex];
-        let s = coord.s;
-        // Les sommets de couture occupent la moitié droite de la peau
-        // lorsqu'ils appartiennent à une face arrière.
-        if (coord.onSeam && !triangle.facesFront) s += model.skinWidth / 2;
-        uvs[corner * 2] = (s + 0.5) / model.skinWidth;
-        uvs[corner * 2 + 1] = (coord.t + 0.5) / model.skinHeight;
-        this.sourceIndices[corner] = vertexIndex;
-        corner++;
-      }
-    }
-
-    this.frameBuffers = model.frames.map((frame) => {
-      const positions = new Float32Array(cornerCount * 3);
-      for (let i = 0; i < cornerCount; i++) {
-        const source = this.sourceIndices[i] * 3;
-        // Passage du repère du jeu à celui du moteur de rendu.
-        positions[i * 3] = frame.positions[source];
-        positions[i * 3 + 1] = frame.positions[source + 2];
-        positions[i * 3 + 2] = -frame.positions[source + 1];
-      }
-      return positions;
-    });
-
+  /**
+   * `skin` remplace la peau d'origine sans rien changer d'autre : les
+   * coordonnées de texture restent celles du modèle, si bien qu'une image
+   * refaite au même agencement se pose exactement où il faut.
+   */
+  constructor(
+    model: MdlModel,
+    palette: Palette,
+    options: AliasModelOptions,
+    skin: THREE.Texture | null = null,
+  ) {
+    this.model = model;
+    const share = shareOf(model, palette, options);
+    this.frameBuffers = share.frameBuffers;
+    this.textureSet = share.textureSet;
     this.frameCount = this.frameBuffers.length;
 
     this.geometry = new THREE.BufferGeometry();
@@ -136,18 +189,7 @@ export class AliasModel {
       'aNextPosition',
       new THREE.BufferAttribute(this.frameBuffers[Math.min(1, this.frameCount - 1)], 3),
     );
-    this.geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-
-    const skin = model.skins[0];
-    this.textureSet = buildTextureSet(
-      skin
-        ? { name: 'skin', width: skin.width, height: skin.height, pixels: skin.pixels }
-        : { name: 'skin', width: 16, height: 16, pixels: null },
-      palette,
-      { anisotropy: options.anisotropy, maxUpscale: 2, normalStrength: 1.4 },
-    );
-    this.textureSet.map.wrapS = THREE.ClampToEdgeWrapping;
-    this.textureSet.map.wrapT = THREE.ClampToEdgeWrapping;
+    this.geometry.setAttribute('uv', new THREE.BufferAttribute(share.uvs, 2));
 
     const empty = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
     empty.needsUpdate = true;
@@ -156,7 +198,7 @@ export class AliasModel {
       vertexShader: aliasVertexShader,
       fragmentShader: aliasFragmentShader,
       uniforms: {
-        uMap: { value: this.textureSet.map },
+        uMap: { value: skin ?? this.textureSet.map },
         uSurface: { value: this.textureSet.surfaceMap },
         uEmissive: { value: this.textureSet.emissiveMap ?? empty },
         uHasEmissive: { value: this.textureSet.emissiveMap ? 1 : 0 },
@@ -233,8 +275,14 @@ export class AliasModel {
   dispose(): void {
     this.geometry.dispose();
     this.material.dispose();
-    this.textureSet.map.dispose();
-    this.textureSet.surfaceMap.dispose();
-    this.textureSet.emissiveMap?.dispose();
+    // Les images et la peau servent aux autres exemplaires du même modèle :
+    // elles ne partent qu'avec le dernier.
+    const share = sharedByModel.get(this.model);
+    if (share && --share.users <= 0) {
+      share.textureSet.map.dispose();
+      share.textureSet.surfaceMap.dispose();
+      share.textureSet.emissiveMap?.dispose();
+      sharedByModel.delete(this.model);
+    }
   }
 }

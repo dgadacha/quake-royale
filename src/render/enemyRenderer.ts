@@ -83,6 +83,7 @@ export class EnemyRenderer {
     palette: Palette | null = null,
     options: AliasModelOptions | null = null,
     detailed: Map<string, TransferredSource> | null = null,
+    skins: Map<string, THREE.Texture> | null = null,
   ) {
     this.root.name = 'enemies';
 
@@ -93,7 +94,9 @@ export class EnemyRenderer {
         // Le maillage détaillé, quand il existe, remplace celui d'origine sans
         // rien changer aux séquences : elles sont lues sur le même modèle.
         const source = detailed?.get(enemy.classname) ?? null;
-        const model = source ? source.create(options!) : new AliasModel(parsed, palette!, options!);
+        const model = source
+          ? source.create(options!)
+          : new AliasModel(parsed, palette!, options!, skins?.get(enemy.classname) ?? null);
         model.mesh.layers.enable(SHADOW_CASTER_LAYER);
         const group = new THREE.Group();
         group.add(model.mesh);

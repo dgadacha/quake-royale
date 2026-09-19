@@ -13,10 +13,16 @@ import { ImpactParticles } from '../render/impactParticles';
 import { surfaceAt } from './entities/SurfaceProbe';
 import type { AudioEngine } from '../audio/AudioEngine';
 import { creatureSounds, pick, soundTable, type CreatureEvent } from '../audio/soundTable';
-import { collectEnemies, detailedEnemyModels, enemyModels } from './entities/Enemy';
+import {
+  collectEnemies,
+  detailedEnemyModels,
+  detailedEnemySkins,
+  enemyModels,
+} from './entities/Enemy';
 import { parseMdl, type MdlModel } from '../formats/mdl';
 import { EnemyManager } from './entities/EnemyManager';
 import { loadTransferredModel, type TransferredSource } from '../render/transferredModel';
+import { subdivideModel } from '../render/subdivideModel';
 import { EnemyRenderer } from '../render/enemyRenderer';
 import { fireRay } from './entities/Combat';
 import { collectMovers } from './entities/BrushEntity';
@@ -314,6 +320,25 @@ export async function loadBspLevel(
     return modelCache.get(path) ?? null;
   };
 
+  /**
+   * Finesse des modèles d'adversaires.
+   * Chaque niveau quadruple le nombre de faces et la place occupée par les
+   * images clés : deux suffisent à effacer les angles.
+   */
+  const ENEMY_SUBDIVISIONS = 2;
+
+  // Modèle affiné, partagé par tous ceux qui emploient le même fichier.
+  const displayCache = new Map<string, MdlModel | null>();
+  const loadDisplayModel = (classname: string): MdlModel | null => {
+    const path = enemyModels[classname];
+    if (!path) return null;
+    if (!displayCache.has(path)) {
+      const raw = loadEnemyModel(classname);
+      displayCache.set(path, raw ? subdivideModel(raw, ENEMY_SUBDIVISIONS) : null);
+    }
+    return displayCache.get(path) ?? null;
+  };
+
   onProgress(0.82, 'Occupants du niveau');
   await breathe();
 
@@ -342,14 +367,37 @@ export async function loadBspLevel(
     await breathe();
   }
 
-  const enemyRenderer = new EnemyRenderer(enemies, loadEnemyModel, palette, {
+  // Peaux refaites : facultatives, et sans effet sur le jeu. Les coordonnées
+  // de texture restent celles du modèle, donc une image au même agencement se
+  // pose exactement où il faut.
+  const skins = new Map<string, THREE.Texture>();
+  for (const [classname, url] of Object.entries(detailedEnemySkins)) {
+    if (!present.has(classname)) continue;
+    try {
+      const texture = await new THREE.TextureLoader().loadAsync(url);
+      // La peau d'origine n'est pas retournée : celle-ci ne doit pas l'être.
+      texture.flipY = false;
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.wrapS = THREE.ClampToEdgeWrapping;
+      texture.wrapT = THREE.ClampToEdgeWrapping;
+      texture.anisotropy = options.anisotropy;
+      texture.needsUpdate = true;
+      skins.set(classname, texture);
+      console.info(`[quake-hd] ${classname} : peau refaite ${texture.image.width}x${texture.image.height}`);
+    } catch {
+      // Sans image, la peau d'origine fait l'affaire.
+    }
+    await breathe();
+  }
+
+  const enemyRenderer = new EnemyRenderer(enemies, loadDisplayModel, palette, {
     anisotropy: options.anisotropy,
     ambient: options.ambient,
     fogColor: options.fogColor,
     fogDensity: options.fogDensity,
     lightScale: options.lightScale,
     emissiveStrength: options.emissiveStrength,
-  }, detailed);
+  }, detailed, skins);
 
   // Traces laissées par les tirs et éclats projetés à l'impact.
   const decals = new DecalPool();

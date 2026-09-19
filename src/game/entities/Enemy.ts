@@ -98,7 +98,22 @@ export function profileFor(classname: string): EnemyProfile {
  * viennent de toute façon de celui-ci.
  */
 export const detailedEnemyModels: Record<string, string> = {
-  monster_army: 'data/hd/models/soldier.glb',
+  // Vide : les adversaires sont désormais affinés à partir de leur propre
+  // modèle, dont ils gardent la pose, l'arme et les coordonnées de texture.
+  // Rapporter un maillage venu d'ailleurs reste possible — il suffit d'ajouter
+  // ici le fichier produit par tools/prepare-enemy.mjs — mais cela ne peut
+  // qu'approcher l'animation là où la subdivision la reproduit exactement.
+};
+
+/**
+ * Peaux refaites, à l'agencement du modèle d'origine.
+ *
+ * Les coordonnées de texture ne bougent pas : une image au même agencement,
+ * simplement plus grande, se pose exactement où il faut. Les tailles
+ * d'origine sont de trois cents pixels sur deux cents environ.
+ */
+export const detailedEnemySkins: Record<string, string> = {
+  monster_army: 'data/hd/skins/soldier.png',
 };
 
 export const enemyModels: Record<string, string> = {
