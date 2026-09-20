@@ -127,7 +127,10 @@ export interface DetailedSkin {
 }
 
 export const detailedEnemySkins: Record<string, DetailedSkin> = {
-  monster_army: { url: 'data/hd/skins/soldier.png', backShift: -0.0167 },
+  // Vide : les adversaires portent la peau de leur propre modèle. Le
+  // mécanisme reste en place — une ligne suffit à réessayer une peau refaite,
+  // par exemple :
+  //   monster_army: { url: 'data/hd/skins/soldier.png', backShift: -0.0167 },
 };
 
 export const enemyModels: Record<string, string> = {
