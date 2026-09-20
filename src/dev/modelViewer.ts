@@ -57,7 +57,13 @@ export class ModelViewer {
   private elapsed = 0;
   private frameIndex = 0;
   private running = false;
-  private yaw = Math.PI * 0.75;
+  /**
+   * Les créatures du jeu regardent vers l'axe des abscisses : la caméra part
+   * de ce côté, légèrement décalée pour donner du relief. Partie de l'autre,
+   * elle montrait le dos, et sa peau avec — de quoi croire à une texture
+   * inversée alors qu'on regardait simplement le modèle par-derrière.
+   */
+  private yaw = 0.42;
   private pitch = 0.15;
   private distance = 110;
   /** Hauteur visée, prise sur le modèle : tous ne sont pas des créatures. */
