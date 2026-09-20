@@ -4,9 +4,15 @@ import type { MdlFrame, MdlModel } from '../formats/mdl';
  * Affine un modèle du jeu en subdivisant ses triangles.
  *
  * Les modèles d'origine comptent quelques centaines de faces : de près, la
- * silhouette est une suite d'angles. Les subdiviser selon le schéma de Loop
- * arrondit la surface sans rien changer d'autre — mêmes coordonnées de
- * texture, mêmes images, même arme au même endroit.
+ * silhouette est une suite d'angles. Les subdiviser adoucit la surface sans
+ * rien changer d'autre — mêmes coordonnées de texture, mêmes images, même
+ * arme au même endroit.
+ *
+ * La subdivision passe par les sommets d'origine au lieu de les déplacer.
+ * C'est ce qui sépare une surface affinée d'une surface rabotée : les schémas
+ * qui repositionnent tirent chaque sommet vers la moyenne de ses voisins, et
+ * une partie fine — un bras, un canon — s'amincit jusqu'à se fondre dans ce
+ * qui l'entoure.
  *
  * L'intérêt tient dans ce qui n'arrive pas. Chaque sommet ajouté est une
  * combinaison à poids fixes de sommets d'origine : la règle appliquée à
@@ -14,14 +20,6 @@ import type { MdlFrame, MdlModel } from '../formats/mdl';
  * reste donc celle du jeu, au sommet près, là où rapporter un maillage venu
  * d'ailleurs ne peut que l'approcher.
  */
-
-/** Poids du sommet conservé, selon son nombre de voisins. */
-function loopBeta(valence: number): number {
-  if (valence <= 2) return 0;
-  if (valence === 3) return 3 / 16;
-  const inner = 3 / 8 + 0.25 * Math.cos((2 * Math.PI) / valence);
-  return (1 / valence) * (5 / 8 - inner * inner);
-}
 
 interface EdgeRecord {
   /** Extrémités, dans l'ordre croissant. */
@@ -37,7 +35,6 @@ interface EdgeRecord {
 function subdivideOnce(model: MdlModel): MdlModel {
   const base = model.vertexCount;
   const edges = new Map<string, EdgeRecord>();
-  const neighbours: Set<number>[] = Array.from({ length: base }, () => new Set<number>());
 
   const key = (a: number, b: number) => (a < b ? `${a}:${b}` : `${b}:${a}`);
   const record = (a: number, b: number, opposite: number): EdgeRecord => {
@@ -48,8 +45,6 @@ function subdivideOnce(model: MdlModel): MdlModel {
       edges.set(k, edge);
     }
     edge.opposite.push(opposite);
-    neighbours[a].add(b);
-    neighbours[b].add(a);
     return edge;
   };
 
@@ -68,23 +63,12 @@ function subdivideOnce(model: MdlModel): MdlModel {
   const frames: MdlFrame[] = model.frames.map((frame) => {
     const positions = new Float32Array(vertexCount * 3);
 
-    for (let v = 0; v < base; v++) {
-      const around = neighbours[v];
-      const valence = around.size;
-      const beta = loopBeta(valence);
-      let x = 0;
-      let y = 0;
-      let z = 0;
-      for (const other of around) {
-        x += frame.positions[other * 3];
-        y += frame.positions[other * 3 + 1];
-        z += frame.positions[other * 3 + 2];
-      }
-      const keep = 1 - valence * beta;
-      positions[v * 3] = frame.positions[v * 3] * keep + x * beta;
-      positions[v * 3 + 1] = frame.positions[v * 3 + 1] * keep + y * beta;
-      positions[v * 3 + 2] = frame.positions[v * 3 + 2] * keep + z * beta;
-    }
+    // Les sommets d'origine ne bougent pas. Le schéma de Loop les
+    // repositionnerait vers la moyenne de leurs voisins, ce qui arrondit en
+    // rétrécissant : sur un bras ou un canon, quelques unités suffisent à le
+    // faire fondre dans ce qui l'entoure. La surface affinée doit passer par
+    // le modèle, pas le raboter.
+    positions.set(frame.positions.subarray(0, base * 3));
 
     for (const edge of edgeList) {
       const o = edge.index * 3;

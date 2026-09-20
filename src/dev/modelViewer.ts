@@ -62,7 +62,8 @@ export class ModelViewer {
   private distance = 110;
   /** Hauteur visée, prise sur le modèle : tous ne sont pas des créatures. */
   private target = 0;
-  private readonly lampColour = new THREE.Color(0.55, 0.54, 0.5);
+  /** Lampe d'appoint : discrète, sinon elle écrase les teintes de la peau. */
+  private readonly lampColour = new THREE.Color(0.3, 0.29, 0.27);
   private previousColorSpace: THREE.ColorSpace = THREE.LinearSRGBColorSpace;
   private dragging = false;
   private lastPointer: [number, number] = [0, 0];
@@ -76,7 +77,7 @@ export class ModelViewer {
     useDetailedSkin: true,
     playing: true,
     speed: 1,
-    brightness: 1.5,
+    brightness: 1,
     sequence: null,
   };
 
@@ -238,13 +239,15 @@ export class ModelViewer {
   private applyBrightness(): void {
     const material = this.model?.mesh.material as THREE.ShaderMaterial | undefined;
     if (!material) return;
+    // Au-delà, les trois canaux butent au plafond et la teinte dominante de
+    // la peau envahit tout : on ne lit plus les volumes.
     const level = this.state.brightness;
     (material.uniforms.uAmbient.value as THREE.Color).setRGB(
-      0.38 * level,
-      0.375 * level,
-      0.4 * level,
+      0.34 * level,
+      0.335 * level,
+      0.36 * level,
     );
-    material.uniforms.uLightScale.value = 0.85 * level;
+    material.uniforms.uLightScale.value = 0.72 * level;
   }
 
   private applyWireframe(): void {
@@ -435,7 +438,7 @@ export class ModelViewer {
         </label>
 
         <label class="viewer-row"><span>Éclairage</span>
-          <input type="range" min="0.4" max="3" step="0.1" value="${this.state.brightness}" data-brightness />
+          <input type="range" min="0.3" max="1.8" step="0.05" value="${this.state.brightness}" data-brightness />
         </label>
 
         <label class="viewer-row"><span>Fil de fer</span>
