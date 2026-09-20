@@ -96,7 +96,12 @@ interface SharedAlias {
 
 const sharedByModel = new WeakMap<MdlModel, SharedAlias>();
 
-function shareOf(model: MdlModel, palette: Palette, options: AliasModelOptions): SharedAlias {
+function shareOf(
+  model: MdlModel,
+  palette: Palette,
+  options: AliasModelOptions,
+  backShift: number,
+): SharedAlias {
   const existing = sharedByModel.get(model);
   if (existing) {
     existing.users++;
@@ -115,7 +120,7 @@ function shareOf(model: MdlModel, palette: Palette, options: AliasModelOptions):
       // Les sommets de couture occupent la moitié droite de la peau
       // lorsqu'ils appartiennent à une face arrière.
       if (coord.onSeam && !triangle.facesFront) s += model.skinWidth / 2;
-      uvs[corner * 2] = (s + 0.5) / model.skinWidth;
+      uvs[corner * 2] = (s + 0.5) / model.skinWidth + (triangle.facesFront ? 0 : backShift);
       uvs[corner * 2 + 1] = (coord.t + 0.5) / model.skinHeight;
       sourceIndices[corner] = vertexIndex;
       corner++;
@@ -176,9 +181,10 @@ export class AliasModel {
     palette: Palette,
     options: AliasModelOptions,
     skin: THREE.Texture | null = null,
+    backShift = 0,
   ) {
     this.model = model;
-    const share = shareOf(model, palette, options);
+    const share = shareOf(model, palette, options, skin ? backShift : 0);
     this.frameBuffers = share.frameBuffers;
     this.textureSet = share.textureSet;
     this.frameCount = this.frameBuffers.length;

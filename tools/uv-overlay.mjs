@@ -12,11 +12,15 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { deflateSync, inflateSync } from 'node:zlib';
 import { dirname } from 'node:path';
 
-const [modelName, skinPath, outPath] = process.argv.slice(2);
+const [modelName, skinPath, outPath, shiftArg] = process.argv.slice(2);
 if (!modelName || !skinPath || !outPath) {
-  console.error('usage : node tools/uv-overlay.mjs <progs/xxx.mdl> <peau.png> <sortie.png>');
+  console.error(
+    'usage : node tools/uv-overlay.mjs <progs/xxx.mdl> <peau.png> <sortie.png> [recalage du dos]',
+  );
   process.exit(1);
 }
+// Même recalage que celui du jeu, pour voir ce qu'il donne vraiment.
+const BACK_SHIFT = Number(shiftArg ?? 0);
 
 // ------------------------------------------------------------------- PNG
 
@@ -202,7 +206,8 @@ for (const triangle of triangles) {
     const coord = coords[v];
     let s = coord.s;
     if (coord.onSeam && !triangle.facesFront) s += skinWidth / 2;
-    return [((s + 0.5) / skinWidth) * skin.w, ((coord.t + 0.5) / skinHeight) * skin.h];
+    const u = (s + 0.5) / skinWidth + (triangle.facesFront ? 0 : BACK_SHIFT);
+    return [u * skin.w, ((coord.t + 0.5) / skinHeight) * skin.h];
   });
   for (let k = 0; k < 3; k++) {
     const a = points[k];

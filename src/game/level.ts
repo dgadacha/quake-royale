@@ -370,11 +370,11 @@ export async function loadBspLevel(
   // Peaux refaites : facultatives, et sans effet sur le jeu. Les coordonnées
   // de texture restent celles du modèle, donc une image au même agencement se
   // pose exactement où il faut.
-  const skins = new Map<string, THREE.Texture>();
-  for (const [classname, url] of Object.entries(detailedEnemySkins)) {
+  const skins = new Map<string, { texture: THREE.Texture; backShift: number }>();
+  for (const [classname, entry] of Object.entries(detailedEnemySkins)) {
     if (!present.has(classname)) continue;
     try {
-      const texture = await new THREE.TextureLoader().loadAsync(url);
+      const texture = await new THREE.TextureLoader().loadAsync(entry.url);
       // La peau d'origine n'est pas retournée : celle-ci ne doit pas l'être.
       texture.flipY = false;
       texture.colorSpace = THREE.SRGBColorSpace;
@@ -382,8 +382,11 @@ export async function loadBspLevel(
       texture.wrapT = THREE.ClampToEdgeWrapping;
       texture.anisotropy = options.anisotropy;
       texture.needsUpdate = true;
-      skins.set(classname, texture);
-      console.info(`[quake-hd] ${classname} : peau refaite ${texture.image.width}x${texture.image.height}`);
+      skins.set(classname, { texture, backShift: entry.backShift ?? 0 });
+      console.info(
+        `[quake-hd] ${classname} : peau refaite ${texture.image.width}x${texture.image.height}` +
+          (entry.backShift ? `, dos recalé de ${(entry.backShift * 100).toFixed(1)} %` : ''),
+      );
     } catch {
       // Sans image, la peau d'origine fait l'affaire.
     }

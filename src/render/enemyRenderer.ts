@@ -83,7 +83,7 @@ export class EnemyRenderer {
     palette: Palette | null = null,
     options: AliasModelOptions | null = null,
     detailed: Map<string, TransferredSource> | null = null,
-    skins: Map<string, THREE.Texture> | null = null,
+    skins: Map<string, { texture: THREE.Texture; backShift: number }> | null = null,
   ) {
     this.root.name = 'enemies';
 
@@ -96,7 +96,13 @@ export class EnemyRenderer {
         const source = detailed?.get(enemy.classname) ?? null;
         const model = source
           ? source.create(options!)
-          : new AliasModel(parsed, palette!, options!, skins?.get(enemy.classname) ?? null);
+          : new AliasModel(
+              parsed,
+              palette!,
+              options!,
+              skins?.get(enemy.classname)?.texture ?? null,
+              skins?.get(enemy.classname)?.backShift ?? 0,
+            );
         model.mesh.layers.enable(SHADOW_CASTER_LAYER);
         const group = new THREE.Group();
         group.add(model.mesh);

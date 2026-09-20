@@ -112,8 +112,22 @@ export const detailedEnemyModels: Record<string, string> = {
  * simplement plus grande, se pose exactement où il faut. Les tailles
  * d'origine sont de trois cents pixels sur deux cents environ.
  */
-export const detailedEnemySkins: Record<string, string> = {
-  monster_army: 'data/hd/skins/soldier.png',
+export interface DetailedSkin {
+  url: string;
+  /**
+   * Recalage horizontal de la moitié arrière, en fraction de la largeur.
+   *
+   * Une peau du jeu range l'avant à gauche et l'arrière à droite, le moteur
+   * passant de l'une à l'autre en ajoutant exactement une demi-largeur. Une
+   * peau refaite ailleurs place rarement le raccord au pixel près : quelques
+   * centièmes suffisent à décaler tout le dos, et c'est là que cela se voit.
+   * Mesuré par tools/skin-align.mjs.
+   */
+  backShift?: number;
+}
+
+export const detailedEnemySkins: Record<string, DetailedSkin> = {
+  monster_army: { url: 'data/hd/skins/soldier.png', backShift: -0.0167 },
 };
 
 export const enemyModels: Record<string, string> = {
