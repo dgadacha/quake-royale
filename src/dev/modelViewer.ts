@@ -70,7 +70,9 @@ export class ModelViewer {
   private readonly state: ViewerState = {
     path: '',
     subdivisions: 2,
-    wireframe: false,
+    // Le maillage est montré d'emblée : c'est ce qu'on vient comparer d'un
+    // niveau de subdivision à l'autre, et la peau seule ne le dit pas.
+    wireframe: true,
     useDetailedSkin: true,
     playing: true,
     speed: 1,
