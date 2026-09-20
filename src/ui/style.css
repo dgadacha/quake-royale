@@ -485,3 +485,120 @@ kbd {
   text-align: center;
   line-height: 1.9;
 }
+
+/* Visualisateur de modèles : deux colonnes, le centre laissé au modèle pour
+   qu'on puisse le faire tourner en glissant dessus. */
+.viewer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+  font-size: 13px;
+}
+
+.viewer-side,
+.viewer-controls {
+  pointer-events: auto;
+  width: 250px;
+  margin: 18px;
+  padding: 16px;
+  border: 1px solid #2b2733;
+  border-radius: 4px;
+  background: rgba(10, 9, 14, 0.88);
+  color: #c2bbb0;
+  max-height: calc(100vh - 36px);
+  overflow-y: auto;
+}
+
+.viewer h2 {
+  margin: 0 0 12px;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #d9a441;
+}
+
+.viewer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.viewer-item {
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #9d968c;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.viewer-item:hover {
+  background: #1a1822;
+  color: #e6ded2;
+}
+
+.viewer-item.on {
+  background: #2a2333;
+  color: #d9a441;
+}
+
+.viewer-back {
+  margin-bottom: 14px;
+  padding: 6px 12px;
+  border: 1px solid #3a3442;
+  border-radius: 3px;
+  background: transparent;
+  color: #c2bbb0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.viewer-back:hover {
+  border-color: #d9a441;
+  color: #d9a441;
+}
+
+.viewer-details {
+  margin: 0 0 16px;
+  color: #8d867c;
+  line-height: 1.7;
+}
+
+.viewer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.viewer-row select,
+.viewer-row input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  padding: 4px;
+  border: 1px solid #3a3442;
+  border-radius: 3px;
+  background: #14121b;
+  color: #e6ded2;
+  font: inherit;
+}
+
+.viewer-frame {
+  margin: 16px 0 8px;
+  padding: 7px 10px;
+  border-radius: 3px;
+  background: #14121b;
+  color: #d9a441;
+  text-align: center;
+}
+
+.viewer-note {
+  margin: 8px 0 0;
+  color: #6f6a62;
+  line-height: 1.7;
+}

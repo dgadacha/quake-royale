@@ -7,6 +7,8 @@ import { applyPreset, type QualityPreset } from './render/graphics';
 import { installHarness } from './dev/harness';
 import { loadEntityMapping, type EntityModelMap } from './game/entityModels';
 import { AudioEngine } from './audio/AudioEngine';
+import { Palette } from './formats/palette';
+import { ModelViewer } from './dev/modelViewer';
 import { allSoundPaths } from './audio/soundTable';
 
 const canvas = document.getElementById('viewport') as HTMLCanvasElement;
@@ -101,7 +103,46 @@ function refreshMenu(note?: string): void {
       }, path),
     onFiles: (files) => void addFiles(files),
     onGraphics: () => showGraphicsPanel(note),
+    onModels: () => openModelViewer(note),
   }, note);
+}
+
+/**
+ * Ouvre le visualisateur de modèles.
+ *
+ * Il prend la main sur le rendu le temps qu'on regarde : la partie n'a rien à
+ * y faire, et juger un modèle au milieu d'un niveau mène à des conclusions
+ * fausses.
+ */
+function openModelViewer(note?: string): void {
+  const paths = vfs.list('progs/', '.mdl').sort();
+  if (paths.length === 0) {
+    overlay.showError(
+      "Aucun modèle monté. Ajoutez une archive du jeu pour en disposer.",
+      () => refreshMenu(note),
+    );
+    return;
+  }
+
+  const data = vfs.read('gfx/palette.lmp');
+  session.stop();
+  overlay.hide();
+
+  const viewer = new ModelViewer(
+    {
+      renderer: session.renderer,
+      vfs,
+      palette: data ? new Palette(data) : Palette.fallback(),
+      anisotropy: session.renderer.capabilities.getMaxAnisotropy(),
+      container: overlayRoot,
+      onExit: () => {
+        viewer.dispose();
+        refreshMenu(note);
+      },
+    },
+    paths,
+  );
+  viewer.start();
 }
 
 function showGraphicsPanel(note?: string): void {

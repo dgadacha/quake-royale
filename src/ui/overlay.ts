@@ -6,6 +6,7 @@ export interface MenuHandlers {
   onMap(path: string): void;
   onFiles(files: FileList): void;
   onGraphics(): void;
+  onModels(): void;
 }
 
 export interface GraphicsRow {
@@ -206,6 +207,13 @@ export class Overlay {
       drop.classList.remove('hot');
       if (event.dataTransfer?.files.length) handlers.onFiles(event.dataTransfer.files);
     });
+
+    section('Outils');
+    const models = document.createElement('button');
+    models.innerHTML =
+      'Visualisateur de modèles<span class="hint">Voir un modèle seul, ses séquences, sa peau et sa subdivision</span>';
+    models.addEventListener('click', handlers.onModels);
+    panel.append(models);
 
     section('Image');
     const graphics = document.createElement('button');
